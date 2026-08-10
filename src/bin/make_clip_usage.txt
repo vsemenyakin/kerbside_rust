@@ -1,0 +1,9 @@
+make_clip -- render the synthetic scene to files.
+
+    --frames N      number of frames to render (default 400)
+    --seed N        override video.SCENE_SEED
+    --mp4 PATH      write an mp4 (lossy; viewing only)
+    --png-dir DIR   write lossless PNGs
+    --raw PATH      write packed 8-bit BGR, width*height*3 bytes per frame
+    --hash          print a per-frame SHA-256
+    --truth         print ground-truth speeds

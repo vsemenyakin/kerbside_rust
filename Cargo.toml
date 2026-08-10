@@ -1,0 +1,53 @@
+[package]
+name = "kerbside"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "A roadside speed-enforcement camera -- Rust port of the kerbside porting proxy"
+license = "MIT"
+
+[[bin]]
+name = "kerbside"
+path = "src/main.rs"
+
+[[bin]]
+name = "make_clip"
+path = "src/bin/make_clip.rs"
+
+[dependencies]
+# The same native libraries the Python calls. This is the point of the port:
+# roughly three quarters of the frame is already inside these two, and that
+# share costs exactly the same from Rust. Swapping either for a pure-Rust
+# reimplementation would make the comparison meaningless.
+opencv = { version = "0.100", default-features = false, features = ["imgproc", "video", "videoio", "imgcodecs"] }
+# `load-dynamic`: ONNX Runtime is opened at run time rather than linked in.
+#
+# Two reasons, and the second is the one that matters for the port evaluation.
+# The immediate one is that the prebuilt static libraries are built against a
+# newer MSVC STL than some VS 2022 installs ship, and linking them fails on an
+# unresolved `__std_find_last_of_trivial_pos_1`. The lasting one is that a
+# separately shipped `onnxruntime` is how the Raspberry Pi image is built too,
+# so both targets load the same kind of artefact and the RE assessment does not
+# have to caveat that one build inlined the runtime and the other did not.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "api-26"] }
+ndarray = "0.17"
+
+# The lock-free settings rebind. `apply()` in the Python is a module-global
+# assignment that the GIL makes atomic for free; there is no such thing here,
+# so it becomes an explicit atomic Arc swap. See src/config/mod.rs.
+arc-swap = "1.7"
+
+# The result CSV carries a SHA-256 of its own rows, and the clip tool hashes
+# frames so a port's scene generator can be checked frame by frame. Pure Rust,
+# no native dependency -- it has to build unchanged on aarch64.
+sha2 = "0.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# Keep symbols: this binary is the subject of a reverse-engineering assessment,
+# and stripping is one of the variables under test rather than a default.
+# See docs/re_scoring.md in the Python repository.
+debug = false
+panic = "unwind"
