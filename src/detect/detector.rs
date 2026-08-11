@@ -157,58 +157,76 @@ const RUNTIME_LIBRARY: &str = if cfg!(target_os = "windows") {
 /// startup inside the loader with a panic about a poisoned mutex, several frames
 /// away from the actual problem.
 ///
-/// So the search mirrors [`locate_model`] -- explicit override, then next to the
-/// executable, then the working directory -- and anything not found is reported
-/// as an ordinary error naming every path that was tried.
+/// So the search mirrors [`locate_model`]: explicit override, then next to the
+/// executable, then whatever the platform's own loader can find. Anything not
+/// found is reported as an ordinary error naming every path that was tried.
 fn init_runtime() -> Result<(), String> {
     static READY: OnceLock<Result<(), String>> = OnceLock::new();
-    READY
-        .get_or_init(|| {
-            let mut candidates: Vec<PathBuf> = Vec::new();
-            if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
-                if !path.is_empty() {
-                    candidates.push(PathBuf::from(path));
-                }
-            }
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(dir) = exe.parent() {
-                    candidates.push(dir.join(RUNTIME_LIBRARY));
-                    candidates.push(dir.join("lib").join(RUNTIME_LIBRARY));
-                }
-            }
-            candidates.push(PathBuf::from(RUNTIME_LIBRARY));
+    READY.get_or_init(try_init_runtime).clone()
+}
 
-            let found = candidates.iter().find(|path| path.is_file());
-            let path = match found {
-                Some(path) => path.clone(),
-                None => {
-                    return Err(format!(
-                        "{RUNTIME_LIBRARY} was not found. Looked in:\n  {}\n\
-                         Set ORT_DYLIB_PATH to an ONNX Runtime 1.26 build, or put \
-                         the library next to this binary. On Windows the build \
-                         scripts do both:\n    . .\\scripts\\env-windows.ps1\n\
-                         See BUILD.md.",
-                        candidates
-                            .iter()
-                            .map(|p| p.display().to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n  ")
-                    ))
-                }
-            };
+fn try_init_runtime() -> Result<(), String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
+        if !path.is_empty() {
+            candidates.push(PathBuf::from(path));
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(RUNTIME_LIBRARY));
+            candidates.push(dir.join("lib").join(RUNTIME_LIBRARY));
+        }
+    }
 
-            ort::init_from(&path)
-                .map_err(|e| {
-                    format!(
-                        "{} could not be loaded as ONNX Runtime: {e}\nIt must be a \
-                         1.26-compatible build for this architecture.",
-                        path.display()
-                    )
-                })?
-                .commit();
-            Ok(())
+    if let Some(path) = candidates.iter().find(|path| path.is_file()) {
+        return ort::init_from(path)
+            .map_err(|e| {
+                format!(
+                    "{} could not be loaded as ONNX Runtime: {e}\nIt must be a \
+                     1.26-compatible build for this architecture.",
+                    path.display()
+                )
+            })
+            .map(|environment| {
+                environment.commit();
+            });
+    }
+
+    // Nothing on disk where we looked. Hand the bare library name to the
+    // platform loader before giving up: an `apt`-installed or ldconfig-
+    // registered runtime is a perfectly good deployment, and it lives on a
+    // search path this process has no business reimplementing.
+    if ort::init_from(RUNTIME_LIBRARY)
+        .map(|environment| {
+            environment.commit();
         })
-        .clone()
+        .is_ok()
+    {
+        return Ok(());
+    }
+
+    // The remedy depends on the platform, so do not print the other one's.
+    let remedy = if cfg!(target_os = "windows") {
+        "Rebuild with the environment script, which copies it next to the binary:\n\
+         \x20   . .\\scripts\\env-windows.ps1\n\x20   cargo build --release\n\
+         Or set ORT_DYLIB_PATH to an ONNX Runtime 1.26 build."
+    } else {
+        "Fetch the runtime for this architecture and point at it, for example:\n\
+         \x20   curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz\n\
+         \x20   tar xf ort.tgz\n\
+         \x20   export ORT_DYLIB_PATH=\"$PWD/onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so\"\n\
+         Or copy that file next to this binary."
+    };
+    Err(format!(
+        "{RUNTIME_LIBRARY} was not found. Looked in:\n  {}\n  \
+         and on the system library search path.\n{remedy}\nSee BUILD.md.",
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    ))
 }
 
 /// Owns the ONNX session and the worker thread.

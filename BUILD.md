@@ -26,20 +26,37 @@ sudo apt install build-essential pkg-config libopencv-dev clang libclang-dev
 
 `pkg-config` finds OpenCV, so no `OPENCV_*` variables are needed.
 
-ONNX Runtime is loaded at run time rather than linked in, so it needs a shared
-object and a path to it. The simplest source is the official aarch64 release:
-
-```bash
-curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz
-tar xf ort.tgz
-export ORT_DYLIB_PATH="$PWD/onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so"
-```
-
-Then:
-
 ```bash
 cargo build --release
 ```
+
+### ONNX Runtime on the Pi
+
+`apt` has no ONNX Runtime package, so this is the one piece you fetch by hand.
+It is loaded at run time rather than linked in, and the binary looks for
+`libonnxruntime.so` next to itself before anything else — so the least
+error-prone thing is to put it there:
+
+```bash
+curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz
+```
+
+```bash
+tar xf ort.tgz && cp onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so target/release/
+```
+
+After that the binary runs with no environment set, exactly as on Windows. Two
+alternatives, both fine:
+
+* `export ORT_DYLIB_PATH=/path/to/libonnxruntime.so` — takes priority over the
+  copy next to the binary, which makes it the right way to pin a *specific*
+  runtime for a comparison run.
+* Install it system-wide (`sudo cp … /usr/local/lib && sudo ldconfig`) — the
+  binary falls back to the platform loader, so this is found too.
+
+If you set `ORT_DYLIB_PATH` **before** `cargo build`, the build script copies
+that library next to the binary for you, and pip's versioned filename
+(`libonnxruntime.so.1.26.0`) is handled.
 
 **Match the ONNX Runtime version to the Python's.** `requirements.txt` pins
 `onnxruntime==1.26.0`, and a different build dispatches to different kernels —

@@ -122,23 +122,33 @@ fn copy_onnx_runtime(target_dir: &Path) {
     };
     let primary = names[0];
 
-    // Where the library might be, at build time. An explicit ORT_DYLIB_PATH
-    // wins; otherwise look inside the Python project's virtualenv next door,
-    // because pointing both arms at the same runtime is what makes a CSV
-    // comparison attributable to the code rather than to the library.
-    let mut roots: Vec<PathBuf> = Vec::new();
+    // An explicit ORT_DYLIB_PATH names the file directly, and it may well be a
+    // versioned one -- pip ships `libonnxruntime.so.1.26.0`, not the bare
+    // soname. Take it as given and land it under the plain name the loader
+    // looks for.
     if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
         let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            roots.push(parent.to_path_buf());
+        if path.is_file() {
+            copy_if_stale(&path, &target_dir.join(primary));
+            if let Some(parent) = path.parent() {
+                for name in &names[1..] {
+                    let extra = parent.join(name);
+                    if extra.is_file() {
+                        copy_if_stale(&extra, &target_dir.join(name));
+                    }
+                }
+            }
+            return;
         }
     }
+
+    // Otherwise look inside the Python project's virtualenv next door, because
+    // pointing both arms at the same runtime is what makes a CSV comparison
+    // attributable to the code rather than to the library.
+    let mut roots: Vec<PathBuf> = Vec::new();
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(workspace) = manifest.parent() {
-        roots.push(
-            workspace
-                .join("kerbside/venv/Lib/site-packages/onnxruntime/capi"),
-        );
+        roots.push(workspace.join("kerbside/venv/Lib/site-packages/onnxruntime/capi"));
         for python in ["python3.11", "python3.12", "python3.13"] {
             roots.push(
                 workspace
@@ -149,22 +159,40 @@ fn copy_onnx_runtime(target_dir: &Path) {
         }
     }
 
-    let Some(root) = roots.iter().find(|root| root.join(primary).is_file()) else {
+    // `libonnxruntime.so.1.26.0` starts with `libonnxruntime.so`, so a prefix
+    // match finds both the bare soname and the versioned file.
+    let found = roots.iter().find_map(|root| {
+        let entries = std::fs::read_dir(root).ok()?;
+        let mut names: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(primary))
+            })
+            .collect();
+        names.sort();
+        names.into_iter().next().map(|path| (root.clone(), path))
+    });
+
+    let Some((root, source)) = found else {
         // Not fatal. A system-installed runtime on the library search path is a
-        // perfectly good deployment, and so is setting ORT_DYLIB_PATH by hand.
+        // perfectly good deployment, and so is setting ORT_DYLIB_PATH by hand;
+        // the binary falls back to the platform loader before it gives up.
         println!(
             "cargo:warning={primary} was not found at build time; set \
-             ORT_DYLIB_PATH before running, or see BUILD.md"
+             ORT_DYLIB_PATH, install it system-wide, or see BUILD.md"
         );
         return;
     };
 
-    for name in names {
-        let source = root.join(name);
-        if !source.is_file() {
-            continue;
+    copy_if_stale(&source, &target_dir.join(primary));
+    for name in &names[1..] {
+        let extra = root.join(name);
+        if extra.is_file() {
+            copy_if_stale(&extra, &target_dir.join(name));
         }
-        copy_if_stale(&source, &target_dir.join(name));
     }
 }
 
