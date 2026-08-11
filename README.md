@@ -163,13 +163,20 @@ src/
   tuning.rs      empirical constants; also the reverse-engineering target
   bin/make_clip  scene renderer and frame hasher
 model/           vehicle.onnx, copied next to the binary at build time
+tools/           bench.sh, bench.ps1, perf_report.py -- see tools/README.md
 tests/           45 tests
 ```
 
-The Python's `tools/` are not ported. `compare_runs.py` and `perf_report.py` are
-analysis tools rather than parts of the device, and running the *same* comparator
-over both arms is what makes the comparison trustworthy. `export_model.py` stays
-in Python too: it builds the `.onnx` this port consumes.
+`tools/bench.sh`, `tools/bench.ps1` and `tools/perf_report.py` are this arm's
+copies of the Python's benchmarking scripts -- same gates, same table, plus an
+optional `--baseline` that prints the tail comparison against the Python run.
+See [tools/README.md](tools/README.md).
+
+`compare_runs.py`, `make_clip.py` and `export_model.py` are deliberately not
+duplicated: the comparator has to be the *same* program for both arms to make
+its verdict trustworthy, `make_clip` is a Rust binary here because the scene
+generator is the thing under test, and there is one model, built from one
+place.
 
 ## Licence
 

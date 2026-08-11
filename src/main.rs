@@ -48,6 +48,7 @@ kerbside -- a roadside speed-enforcement camera
     --gc-stats          report collector pauses (see the note in main.rs)
     --threaded          run replay through the pipeline thread rather than inline
     --dump-settings     print settings and exit
+    --version           print build and native-library versions, and exit
 ";
 
 #[derive(Default)]
@@ -65,6 +66,7 @@ struct Args {
     gc_stats: bool,
     threaded: bool,
     dump_settings: bool,
+    version: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -89,6 +91,7 @@ fn parse_args() -> Result<Args, String> {
             "--gc-stats" => args.gc_stats = true,
             "--threaded" => args.threaded = true,
             "--dump-settings" => args.dump_settings = true,
+            "--version" | "-V" => args.version = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -126,8 +129,46 @@ fn frame_for(scene: &RoadScene, settings: &Settings, frame_id: i64) -> Result<Ra
     ))
 }
 
+/// What this binary is, and what it will actually call into.
+///
+/// The Python's benchmark script prints the interpreter and library versions
+/// before it records anything, because a stage table is meaningless without
+/// them. This is the equivalent, and it reports the *resolved* ONNX Runtime
+/// path rather than a version string: the crate exposes no version accessor,
+/// and which file was loaded is the thing that actually decides the numbers.
+fn print_version() {
+    println!("kerbside {} ({})", env!("CARGO_PKG_VERSION"), build_profile());
+    match opencv::core::get_version_string() {
+        Ok(version) => println!("opencv       {version} (thread pool pinned by settings)"),
+        Err(e) => println!("opencv       unavailable: {e}"),
+    }
+    match kerbside::detect::probe_runtime() {
+        Ok(()) => println!(
+            "onnxruntime  {}",
+            kerbside::detect::resolved_runtime_path().unwrap_or("loaded, path unknown")
+        ),
+        Err(e) => println!("onnxruntime  NOT LOADED
+{e}"),
+    }
+}
+
+fn build_profile() -> &'static str {
+    // A debug build is several times slower and must never be benchmarked; the
+    // bench scripts refuse to record one, and this is how they can tell.
+    if cfg!(debug_assertions) {
+        "debug -- NOT valid for benchmarking"
+    } else {
+        "release"
+    }
+}
+
 fn run() -> Result<(), String> {
     let args = parse_args()?;
+
+    if args.version {
+        print_version();
+        return Ok(());
+    }
 
     let mut overrides: Vec<(&str, Value)> = Vec::new();
     if let Some(frames) = args.frames {

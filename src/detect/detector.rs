@@ -165,6 +165,24 @@ fn init_runtime() -> Result<(), String> {
     READY.get_or_init(try_init_runtime).clone()
 }
 
+/// Which ONNX Runtime library was actually loaded, once one has been.
+///
+/// A benchmark record has to name it. Two runs that differ only in which
+/// `libonnxruntime` they found are not comparable, and the file path is the
+/// only thing that says which one it was -- the crate exposes no version
+/// accessor.
+static RESOLVED_RUNTIME: OnceLock<String> = OnceLock::new();
+
+/// The ONNX Runtime library this process is using, if the detector has started.
+pub fn resolved_runtime_path() -> Option<&'static str> {
+    RESOLVED_RUNTIME.get().map(String::as_str)
+}
+
+/// Load the runtime, for callers that only want to report on it.
+pub fn probe_runtime() -> Result<(), String> {
+    init_runtime()
+}
+
 fn try_init_runtime() -> Result<(), String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
@@ -190,6 +208,7 @@ fn try_init_runtime() -> Result<(), String> {
             })
             .map(|environment| {
                 environment.commit();
+                let _ = RESOLVED_RUNTIME.set(path.display().to_string());
             });
     }
 
@@ -203,6 +222,7 @@ fn try_init_runtime() -> Result<(), String> {
         })
         .is_ok()
     {
+        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY} (system library path)"));
         return Ok(());
     }
 
