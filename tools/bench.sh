@@ -13,6 +13,9 @@
 #
 #     tools/bench.sh [--frames N] [--out DIR] [--baseline PYTHON_PERF_CSV]
 #
+# BINARY=path/to/kerbside overrides which build is measured, for a copied-out
+# release directory that is not under target/.
+#
 # Override a gate with FORCE=1 if you know why you are doing it. The report
 # records that you did.
 
@@ -25,7 +28,7 @@ OUT="telemetry"
 BASELINE=""
 FORCE="${FORCE:-0}"
 MAX_TEMP_C=65
-BINARY="target/release/kerbside"
+BINARY="${BINARY:-target/release/kerbside}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -55,7 +58,23 @@ if [[ ! -x "$BINARY" ]]; then
     echo "  Build it first:  cargo build --release" >&2
     exit 1
 fi
-VERSION_BLOCK="$("$BINARY" --version)"
+
+# A binary that does not understand --version is one built before this script
+# existed, which means it was built from different source than the tree you are
+# standing in. That is not an environment problem to be forced past -- it is a
+# stale artefact, and benchmarking it would attribute its numbers to code that
+# is not in it. Hence a hard refusal rather than a FORCE-able gate.
+if ! VERSION_BLOCK="$("$BINARY" --version 2>&1)"; then
+    echo "REFUSING TO BENCHMARK: $BINARY does not understand --version." >&2
+    echo "  It predates this script, so it is built from older source than this" >&2
+    echo "  checkout. Rebuild it:" >&2
+    echo "    cargo build --release" >&2
+    echo >&2
+    echo "  What it said:" >&2
+    sed 's/^/    /' <<<"$VERSION_BLOCK" >&2
+    exit 1
+fi
+
 if grep -q "NOT valid for benchmarking" <<<"$VERSION_BLOCK"; then
     fail "$BINARY is a debug build. Timings from it mean nothing.
     cargo build --release"

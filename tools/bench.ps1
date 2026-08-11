@@ -65,7 +65,22 @@ if (-not (Test-Path $binary)) {
     Write-Host "    . .\scripts\env-windows.ps1; cargo build --release" -ForegroundColor Red
     exit 1
 }
-$versionBlock = & $binary --version
+# A binary that does not understand --version predates this script, so it is
+# built from different source than the tree you are standing in. That is a stale
+# artefact rather than an environment condition, so it is a hard refusal and not
+# a -Force-able gate: benchmarking it would attribute its numbers to code that
+# is not in it.
+$versionBlock = & $binary --version 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "REFUSING TO BENCHMARK: $binary does not understand --version." -ForegroundColor Red
+    Write-Host "  It predates this script, so it is built from older source than" -ForegroundColor Red
+    Write-Host "  this checkout. Rebuild it:" -ForegroundColor Red
+    Write-Host "    . .\scripts\env-windows.ps1; cargo build --release" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  What it said:"
+    $versionBlock | ForEach-Object { Write-Host "    $_" }
+    exit 1
+}
 if ($versionBlock -match "NOT valid for benchmarking") {
     Fail "$binary is a debug build. Timings from it mean nothing.`n    cargo build --release"
 }
