@@ -271,12 +271,29 @@ impl Homography {
 ///
 /// So this reproduces the *shape* of what LAPACK does for a small matrix:
 /// factorise once with partial pivoting, then solve for each column of the
-/// identity by forward and back substitution. Verified bitwise against
-/// `np.linalg.inv` for this application's survey in the tests below.
+/// identity by forward and back substitution. Verified against `np.linalg.inv`
+/// for this application's survey in the tests below, to within a handful of
+/// ULPs -- not bit-for-bit.
 ///
-/// Bitwise agreement is asserted for the matrix that matters, not proven in
-/// general -- a different matrix could pivot differently. The test is the
-/// contract; if the survey changes, re-run it.
+/// **Bit-for-bit was the original target and it does not hold across CPU
+/// architectures.** On the machine this was developed on (x86-64), this
+/// function's output matched `np.linalg.inv`'s in every bit. On aarch64
+/// (Raspberry Pi OS) the last one or two bits of some results differ -- the
+/// same class of divergence this project's own docs already call out for
+/// OpenCV and ONNX Runtime dispatching to different vectorised kernels per
+/// architecture, just showing up in scalar arithmetic instead. The compiler is
+/// free to contract a multiply-then-subtract into a single fused
+/// multiply-subtract when the target has that instruction natively, which
+/// aarch64 does as baseline ISA and x86-64 does not, and a fused operation
+/// rounds once where two separate ones round twice. That is a plausible
+/// mechanism, not a confirmed one -- forcing FMA codegen on x86-64 did not
+/// reproduce the divergence when this was checked, so something more specific
+/// to the aarch64 backend is doing it. Nailing the exact cause was not
+/// necessary to fix the test that was asserting the wrong thing.
+///
+/// The tolerance below is chosen to still catch a real error: a wrong pivot
+/// order or a transcribed constant produces a difference many orders of
+/// magnitude larger than a rounding-path difference does.
 fn invert_3x3(m: &[[f64; 3]; 3]) -> Result<[[f64; 3]; 3], String> {
     const N: usize = 3;
     let mut lu = *m;
@@ -378,13 +395,26 @@ mod tests {
         }
     }
 
-    /// The inverse has to agree with `np.linalg.inv` to the last bit, not to
-    /// within a tolerance. These are the exact projections the Python produces
-    /// for the four survey marks, dumped from the interpreter -- see the note
-    /// on [`invert_3x3`] for why a tolerance would not catch the failure this
-    /// is here to catch.
+    /// The inverse has to agree with `np.linalg.inv`, closely, at the four
+    /// survey marks. These are the exact projections the Python produces for
+    /// them, dumped from the interpreter on x86-64.
+    ///
+    /// **Not bit-for-bit.** An earlier version of this test asserted exact
+    /// equality on `to_bits()`, which passed on the x86-64 machine the port was
+    /// built on and failed on aarch64 with a difference of one or two ULPs --
+    /// see the note on [`invert_3x3`] for why. That is expected
+    /// architecture-dependent floating-point rounding, not a wrong answer, so
+    /// the assertion here is a tolerance instead.
+    ///
+    /// The tolerance is `1e-6`: about seven orders of magnitude looser than the
+    /// ULP-level noise actually observed, and about nine orders of magnitude
+    /// tighter than anything that could matter downstream (the least forgiving
+    /// consumer of a homography output is the enforcement gate's own tolerance,
+    /// which is measured in centimetres and km/h, not in millionths of a
+    /// pixel). A genuinely wrong pivot or a transcribed constant misses by much
+    /// more than this and still fails loudly.
     #[test]
-    fn the_inverse_matches_numpy_at_the_survey_marks() {
+    fn the_inverse_agrees_with_numpy_at_the_survey_marks() {
         let h = survey();
         for (world, expected) in [
             ((0.0f64, 0.0f64), (351.99999999999994f64, 690.0f64)),
@@ -393,10 +423,11 @@ mod tests {
             ((0.0, 40.0), (538.0000000000002, 387.99999999999994)),
         ] {
             let p = h.to_image(world.0, world.1);
-            assert_eq!(
-                (p.x.to_bits(), p.y.to_bits()),
-                (expected.0.to_bits(), expected.1.to_bits()),
-                "world {world:?} projected to ({:.17}, {:.17}), expected ({:.17}, {:.17})",
+            let (dx, dy) = ((p.x - expected.0).abs(), (p.y - expected.1).abs());
+            assert!(
+                dx < 1e-6 && dy < 1e-6,
+                "world {world:?} projected to ({:.17}, {:.17}), expected \
+                 ({:.17}, {:.17}) -- off by ({dx:.3e}, {dy:.3e})",
                 p.x,
                 p.y,
                 expected.0,
