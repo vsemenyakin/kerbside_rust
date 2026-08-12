@@ -54,6 +54,31 @@ foreach ($p in @("$env:LLVM_HOME\bin", $binDir)) {
     if ($env:PATH -notlike "*$p*") { $env:PATH = "$p;$env:PATH" }
 }
 
+# Strip build-machine paths out of the binary.
+#
+# Rust embeds the source file name of every panic site -- unwrap, expect, slice
+# indexing, overflow -- and for a dependency that is the absolute path into this
+# machine's cargo registry. An untreated release build carries around ninety
+# strings naming your home directory. They are an information leak in an
+# artefact meant to be installed on a device, and they hand a reverse engineer
+# the module tree for free, which is target T2 of docs/re_scoring.md.
+#
+# Verify with: python tools\check_binary.py target\release\kerbside.exe
+#
+# Changing RUSTFLAGS invalidates the build cache, so the first build after
+# sourcing this rebuilds every dependency. That is expected. It lives here
+# rather than in .cargo\config.toml because the paths differ per machine and
+# that file cannot expand environment variables.
+if ($env:CARGO_HOME) { $cargoHome = $env:CARGO_HOME } else { $cargoHome = "$env:USERPROFILE\.cargo" }
+if ($env:RUSTUP_HOME) { $rustupHome = $env:RUSTUP_HOME } else { $rustupHome = "$env:USERPROFILE\.rustup" }
+$projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if ($env:RUSTFLAGS -notlike "*remap-path-prefix*") {
+    $remap = "--remap-path-prefix=$cargoHome=/cargo " +
+             "--remap-path-prefix=$rustupHome=/rustup " +
+             "--remap-path-prefix=$projectDir=/kerbside"
+    if ($env:RUSTFLAGS) { $env:RUSTFLAGS = "$env:RUSTFLAGS $remap" } else { $env:RUSTFLAGS = $remap }
+}
+
 # ONNX Runtime is opened at run time, so the binary needs a path to it. Point at
 # any 1.26-compatible build; the copy inside the Python project's virtualenv is
 # the best default, because then both implementations run the identical
@@ -69,6 +94,7 @@ if (-not $env:ORT_DYLIB_PATH) {
     }
 }
 
+Write-Host "rustflags: $env:RUSTFLAGS"
 Write-Host "libclang : $env:LIBCLANG_PATH"
 Write-Host "opencv   : $env:OPENCV_LINK_LIBS in $env:OPENCV_LINK_PATHS"
 if ($env:ORT_DYLIB_PATH) {

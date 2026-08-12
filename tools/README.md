@@ -7,6 +7,7 @@ The Rust arm's benchmarking scripts, ported from the Python project's `tools/`.
 | `bench.sh` | The gated benchmark. **This is the one that produces report numbers.** Linux/Raspberry Pi OS. |
 | `bench.ps1` | Windows equivalent, for development signal only — see the warning it prints. |
 | `perf_report.py` | Turns a per-frame perf CSV into the stage table. Called by both. |
+| `check_binary.py` | Scans a built binary for build-machine paths. Run before shipping. |
 
 ```bash
 tools/bench.sh --frames 3000

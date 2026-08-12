@@ -65,13 +65,31 @@ fi
 # stale artefact, and benchmarking it would attribute its numbers to code that
 # is not in it. Hence a hard refusal rather than a FORCE-able gate.
 if ! VERSION_BLOCK="$("$BINARY" --version 2>&1)"; then
-    echo "REFUSING TO BENCHMARK: $BINARY does not understand --version." >&2
-    echo "  It predates this script, so it is built from older source than this" >&2
-    echo "  checkout. Rebuild it:" >&2
-    echo "    cargo build --release" >&2
+    # Two very different faults land here, and conflating them sends people to
+    # the wrong fix. A binary that *ran* and rejected the argument is stale
+    # source; a binary that never started is a missing shared library.
+    if grep -qi "unknown argument" <<<"$VERSION_BLOCK"; then
+        echo "REFUSING TO BENCHMARK: $BINARY does not understand --version." >&2
+        echo "  It predates this script, so it is built from older source than" >&2
+        echo "  this checkout. Rebuild it:" >&2
+        echo "    cargo build --release" >&2
+    else
+        echo "REFUSING TO BENCHMARK: $BINARY would not start." >&2
+        echo "  Usually a shared library it links against is missing. On Windows" >&2
+        echo "  a build done without the environment script links the per-module" >&2
+        echo "  OpenCV DLLs (opencv_core4.dll and friends) instead of the single" >&2
+        echo "  opencv_world DLL that is shipped next to the binary, and the" >&2
+        echo "  loader then fails before main() runs. Rebuild through the script:" >&2
+        echo "    . ./scripts/env-windows.ps1   # or source scripts/env-linux.sh" >&2
+        echo "    cargo build --release" >&2
+    fi
     echo >&2
     echo "  What it said:" >&2
-    sed 's/^/    /' <<<"$VERSION_BLOCK" >&2
+    if [[ -n "${VERSION_BLOCK//[[:space:]]/}" ]]; then
+        sed 's/^/    /' <<<"$VERSION_BLOCK" >&2
+    else
+        echo "    (nothing -- it died before it could print anything)" >&2
+    fi
     exit 1
 fi
 

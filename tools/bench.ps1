@@ -72,13 +72,29 @@ if (-not (Test-Path $binary)) {
 # is not in it.
 $versionBlock = & $binary --version 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "REFUSING TO BENCHMARK: $binary does not understand --version." -ForegroundColor Red
-    Write-Host "  It predates this script, so it is built from older source than" -ForegroundColor Red
-    Write-Host "  this checkout. Rebuild it:" -ForegroundColor Red
+    # Two very different faults land here, and conflating them sends people to
+    # the wrong fix. A binary that *ran* and rejected the argument is stale
+    # source; a binary that never started is a missing DLL.
+    if ("$versionBlock" -match "unknown argument") {
+        Write-Host "REFUSING TO BENCHMARK: $binary does not understand --version." -ForegroundColor Red
+        Write-Host "  It predates this script, so it is built from older source than" -ForegroundColor Red
+        Write-Host "  this checkout. Rebuild it:" -ForegroundColor Red
+    } else {
+        Write-Host "REFUSING TO BENCHMARK: $binary would not start." -ForegroundColor Red
+        Write-Host "  Usually a DLL it links against is missing. A build done without" -ForegroundColor Red
+        Write-Host "  the environment script links the per-module OpenCV DLLs" -ForegroundColor Red
+        Write-Host "  (opencv_core4.dll and friends) instead of the single opencv_world" -ForegroundColor Red
+        Write-Host "  DLL shipped next to the binary, and the loader then fails before" -ForegroundColor Red
+        Write-Host "  main() runs. Rebuild through the script:" -ForegroundColor Red
+    }
     Write-Host "    . .\scripts\env-windows.ps1; cargo build --release" -ForegroundColor Red
     Write-Host ""
     Write-Host "  What it said:"
-    $versionBlock | ForEach-Object { Write-Host "    $_" }
+    if ("$versionBlock".Trim()) {
+        $versionBlock | ForEach-Object { Write-Host "    $_" }
+    } else {
+        Write-Host "    (nothing -- it died before it could print anything)"
+    }
     exit 1
 }
 if ($versionBlock -match "NOT valid for benchmarking") {

@@ -29,7 +29,12 @@ opencv = { version = "0.100", default-features = false, features = ["imgproc", "
 # separately shipped `onnxruntime` is how the Raspberry Pi image is built too,
 # so both targets load the same kind of artefact and the RE assessment does not
 # have to caveat that one build inlined the runtime and the other did not.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "api-26"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-26"] }
+# Note the absence of ort's "tracing" feature. Nothing here installs a tracing
+# subscriber, so every event was being formatted into nothing -- and each one
+# embeds its own `file!()` and line number as span metadata, which no compiler
+# flag removes because they are ordinary data rather than panic locations. That
+# was 26 of the source paths left in the binary. Dead weight and a leak at once.
 ndarray = "0.17"
 
 # The lock-free settings rebind. `apply()` in the Python is a module-global
@@ -48,6 +53,31 @@ lto = "thin"
 codegen-units = 1
 # Keep symbols: this binary is the subject of a reverse-engineering assessment,
 # and stripping is one of the variables under test rather than a default.
-# See docs/re_scoring.md in the Python repository.
+# See docs/re_scoring.md in the Python repository, and `profile.dist` below for
+# the stripped arm of that comparison.
 debug = false
 panic = "unwind"
+
+# What actually gets shipped.
+#
+#     cargo build --profile dist
+#
+# Identical code generation to `release` -- same opt-level, same LTO, so the
+# timings carry over -- plus the symbol table removed. Two separate things are
+# worth keeping separate here:
+#
+#   * **Path remapping is not in this profile**, because it is not optional. It
+#     is applied by the environment scripts to every build, including `release`
+#     and the test binaries, since a build-machine path is a leak wherever it
+#     appears. `tools/check_binary.py` is the check.
+#   * **Stripping is in this profile only**, because it is one of the variables
+#     the reverse-engineering assessment is supposed to *measure*. Build both
+#     and record how long each takes to reverse; that difference is a result,
+#     and defaulting it away would delete the measurement.
+#
+# Stripping matters much more on the Pi than on Windows: an ELF binary carries
+# its symbol table in the file, whereas MSVC keeps names in a separate .pdb that
+# is simply not shipped.
+[profile.dist]
+inherits = "release"
+strip = "symbols"
