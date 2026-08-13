@@ -62,9 +62,11 @@ panic = "unwind"
 #
 #     cargo build --profile dist
 #
-# Identical code generation to `release` -- same opt-level, same LTO, so the
-# timings carry over -- plus the symbol table removed. Two separate things are
-# worth keeping separate here:
+# Nearly the same code generation as `release` -- same opt-level, same LTO --
+# plus the symbol table removed and, via scripts/build.sh, panic = "abort" with
+# a rebuilt std (see the profile below). The panic change means timings no
+# longer carry over from `release` unchanged, so benchmark whatever you ship.
+# Two separate things are worth keeping separate here:
 #
 #   * **Path remapping is not in this profile**, because it is not optional. It
 #     is applied by the environment scripts to every build, including `release`
@@ -81,3 +83,15 @@ panic = "unwind"
 [profile.dist]
 inherits = "release"
 strip = "symbols"
+# scripts/build.sh builds dist on nightly with -Zbuild-std and
+# -Cpanic=immediate-abort, which rebuilds std without its panic machinery --
+# that is what removes the residual /rustc/... source paths and the panic
+# *message strings*, and it also drops the unwind tables. This panic = "abort"
+# is the stable-safe base that flag overrides, and the fallback for a plain
+# `cargo build --profile dist`. immediate-abort cannot live here: its manifest
+# opt-in (cargo-features = ["panic-immediate-abort"]) breaks stable cargo and so
+# every `cargo test --release`. Consequence either way: a panic in a worker
+# thread aborts the process instead of unwinding into an error string --
+# acceptable for a shipped device, and it is why dist's codegen (and timings)
+# diverge from release.
+panic = "abort"

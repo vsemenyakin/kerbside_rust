@@ -43,41 +43,103 @@ if [[ "${RUSTFLAGS:-}" != *remap-path-prefix* ]]; then
 fi
 
 # --- toolchain -----------------------------------------------------------
-# The dist profile builds with nightly, purely for one flag:
-# -Zlocation-detail=none. Rust embeds the source file and line of every panic
-# site, and nothing on stable removes them -- --remap-path-prefix can only
-# rewrite them to something anonymous. That flag makes them empty instead.
+# The dist profile builds with nightly for two things that stable cannot do,
+# and both are the difference between anonymising a leak and removing it:
 #
-# Panics still report their message; they just no longer say which line raised
-# them.
+#   * -Zlocation-detail=none              drops the source file+line of every
+#                                         panic site (src/detect/detector.rs and
+#                                         friends). --remap-path-prefix can only
+#                                         rewrite those, not delete them.
+#   * -Zbuild-std + panic_immediate_abort rebuilds std without its panic
+#                                         machinery, which is where the residual
+#                                         /rustc/... paths and the panic *message
+#                                         strings* come from. Needs the rust-src
+#                                         component and forces --target.
+#
+# There is no stable fallback for either, so when nightly (or rust-src) is
+# missing we REFUSE rather than quietly shipping the leaky binary. Build the
+# un-hardened release profile deliberately if that is what you want.
 #
 # Other profiles use whatever toolchain is default, because they are not what
-# gets shipped. If you ship dist, benchmark dist:
+# gets shipped. dist's codegen now diverges from release (panic = "abort"), so
+# if you ship dist, benchmark dist:
 #     BINARY=target/dist/kerbside tools/bench.sh
 CARGO_ARGS=()
+BUILD_STD_ARGS=()
+HOST_TRIPLE=""
 if [[ "$PROFILE" == "dist" ]]; then
-    if rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
-        CARGO_ARGS+=("+nightly")
-        export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none"
-        echo "toolchain: nightly (-Zlocation-detail=none)"
-    else
-        echo "WARNING: nightly is not installed, so panic-site source paths will" >&2
-        echo "  remain in the binary (anonymised, but present). Install it:" >&2
+    if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
+        echo "REFUSING TO BUILD: the dist profile requires the nightly toolchain." >&2
+        echo "  It removes the first-party source paths (src/detect/detector.rs and" >&2
+        echo "  friends) and the panic message strings; stable can only anonymise" >&2
+        echo "  them. Install it:" >&2
         echo "    rustup toolchain install nightly --profile minimal" >&2
+        echo "    rustup component add rust-src --toolchain nightly" >&2
+        echo "  Or build the un-hardened profile for development or benchmarking:" >&2
+        echo "    scripts/build.sh release" >&2
+        exit 1
     fi
+    if ! rustup component list --toolchain nightly 2>/dev/null \
+            | grep -q '^rust-src .*(installed)'; then
+        echo "REFUSING TO BUILD: -Zbuild-std needs the rust-src component on nightly." >&2
+        echo "    rustup component add rust-src --toolchain nightly" >&2
+        exit 1
+    fi
+    # build-std must know the concrete target; there is no host default for it.
+    HOST_TRIPLE="$(rustc +nightly -vV | awk '/^host: /{print $2}')"
+    if [[ -z "$HOST_TRIPLE" ]]; then
+        echo "REFUSING TO BUILD: could not determine the host target triple from" >&2
+        echo "  'rustc +nightly -vV'." >&2
+        exit 1
+    fi
+    CARGO_ARGS+=("+nightly")
+    # -Cpanic=immediate-abort is the current spelling (nightly 1.99): the old
+    # -Zbuild-std-features=panic_immediate_abort was promoted to a real panic
+    # strategy. It needs -Zunstable-options, and it needs core rebuilt, which is
+    # what -Zbuild-std does. Set here rather than in Cargo.toml because the
+    # manifest opt-in (cargo-features = ["panic-immediate-abort"]) breaks stable
+    # cargo -- and hence every `cargo test --release`. It overrides the dist
+    # profile's stable-safe panic = "abort".
+    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort"
+    BUILD_STD_ARGS+=(
+        "--target" "$HOST_TRIPLE"
+        "-Zbuild-std=std,panic_abort"
+    )
+    echo "toolchain: nightly"
+    echo "  -Zlocation-detail=none               (drop panic-site source paths)"
+    echo "  -Cpanic=immediate-abort + build-std  (drop std paths and panic strings)"
+    echo "  --target $HOST_TRIPLE"
 fi
 
 echo
 echo "== building profile '$PROFILE' -> target/$OUT_DIR =="
-if ! cargo "${CARGO_ARGS[@]}" build --profile "$PROFILE"; then
+if ! cargo "${CARGO_ARGS[@]}" build --profile "$PROFILE" "${BUILD_STD_ARGS[@]}"; then
     echo
     echo "BUILD FAILED" >&2
     exit 1
 fi
 
+# build-std forces --target, which nests the output under target/<triple>/.
+# Re-point the documented target/dist/ path at it so every downstream reference
+# (check_binary below, BUILD.md, BINARY=target/dist/kerbside for bench.sh) keeps
+# working regardless of the host triple.
+if [[ "$PROFILE" == "dist" ]]; then
+    if [[ -d "target/dist" && ! -L "target/dist" ]]; then
+        rm -rf "target/dist"   # stale real directory from a pre-build-std build
+    fi
+    ln -sfn "$HOST_TRIPLE/dist" "target/dist"
+fi
+
 BINARY="target/$OUT_DIR/kerbside"
 
 # --- the leaked-path check -----------------------------------------------
+# dev and release deliberately do not harden away the first-party module tree;
+# only dist does. So allow first-party paths for those (the check still fails on
+# any absolute build-machine path), and demand them gone for dist.
+CHECK_ARGS=()
+if [[ "$PROFILE" != "dist" ]]; then
+    CHECK_ARGS+=("--allow-first-party")
+fi
 echo
 PYTHON="$(command -v python3 || command -v python || true)"
 if [[ -z "$PYTHON" ]]; then
@@ -85,7 +147,7 @@ if [[ -z "$PYTHON" ]]; then
     echo "Run it wherever you do have python:" >&2
     echo "  python3 tools/check_binary.py $BINARY" >&2
 else
-    "$PYTHON" tools/check_binary.py "$BINARY"
+    "$PYTHON" tools/check_binary.py "$BINARY" "${CHECK_ARGS[@]}"
 fi
 
 # --- will it actually start? ---------------------------------------------
