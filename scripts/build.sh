@@ -104,10 +104,15 @@ if [[ "$PROFILE" == "dist" ]]; then
     BUILD_STD_ARGS+=(
         "--target" "$HOST_TRIPLE"
         "-Zbuild-std=std,panic_abort"
+        # Drop the introspection feature so the settings field-name strings
+        # (IMAGE_POINTS, FRAME_WIDTH, ...) and the derived Debug labels never
+        # reach the shipped binary. dev/release keep it (and --dump-settings).
+        "--no-default-features"
     )
     echo "toolchain: nightly"
     echo "  -Zlocation-detail=none               (drop panic-site source paths)"
     echo "  -Cpanic=immediate-abort + build-std  (drop std paths and panic strings)"
+    echo "  --no-default-features                (drop settings field-name strings)"
     echo "  --target $HOST_TRIPLE"
 fi
 

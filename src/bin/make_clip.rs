@@ -20,7 +20,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::process::ExitCode;
 
-use kerbside::config::{resolve_settings, Value};
+use kerbside::config;
 use kerbside::output::frame_hash;
 use kerbside::source::RoadScene;
 use opencv::prelude::*;
@@ -72,11 +72,14 @@ fn parse_args() -> Result<Args, String> {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
-    let mut overrides: Vec<(&str, Value)> = vec![("video.SCENE_FRAMES", Value::Int(args.frames))];
+    // Typed overrides (no field-name strings): mirrors the main binary so this
+    // tool builds under `dist`'s --no-default-features too. See config/mod.rs.
+    let frames = args.frames;
+    let mut overrides: Vec<config::Override> = vec![Box::new(move |s| s.video.SCENE_FRAMES = frames)];
     if let Some(seed) = args.seed {
-        overrides.push(("video.SCENE_SEED", Value::Int(seed)));
+        overrides.push(Box::new(move |s| s.video.SCENE_SEED = seed));
     }
-    let settings = resolve_settings(None, &overrides, false)?;
+    let settings = config::resolve(None, overrides, false)?;
     let scene = RoadScene::new(&settings)?;
 
     let mut writer = match &args.mp4 {

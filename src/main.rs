@@ -23,7 +23,7 @@ use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use kerbside::config::{self, format_dump, resolve_settings, Settings, Value};
+use kerbside::config::{self, Settings};
 use kerbside::consumers::{ConsumerChain, Consumer, FanOut};
 use kerbside::measure::build_homography;
 use kerbside::output::{OverlayWriter, ResultWriter};
@@ -170,36 +170,48 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
-    let mut overrides: Vec<(&str, Value)> = Vec::new();
+    // Typed overrides: each closure assigns a field through its compile-time
+    // offset, naming no string. This is what lets a `dist` build with no name
+    // table still honour the CLI flags. See config/mod.rs.
+    let mut overrides: Vec<config::Override> = Vec::new();
     if let Some(frames) = args.frames {
-        overrides.push(("video.SCENE_FRAMES", Value::Int(frames)));
+        overrides.push(Box::new(move |s| s.video.SCENE_FRAMES = frames));
     }
     if let Some(seed) = args.seed {
-        overrides.push(("video.SCENE_SEED", Value::Int(seed)));
+        overrides.push(Box::new(move |s| s.video.SCENE_SEED = seed));
     }
     if let Some(limit) = args.limit {
-        overrides.push(("enforcement.SPEED_LIMIT_KPH", Value::Float(limit)));
+        overrides.push(Box::new(move |s| s.enforcement.SPEED_LIMIT_KPH = limit));
     }
     if args.perf {
-        overrides.push(("telemetry.MEASURE_STAGES", Value::Bool(true)));
+        overrides.push(Box::new(|s| s.telemetry.MEASURE_STAGES = true));
     }
     if let Some(dir) = &args.perf_dir {
-        overrides.push(("telemetry.PERF_DIR", Value::Str(dir.clone())));
+        let dir = dir.clone();
+        overrides.push(Box::new(move |s| s.telemetry.PERF_DIR = dir.clone()));
     }
     if args.overlay.is_some() {
-        overrides.push(("telemetry.WRITE_OVERLAY", Value::Bool(true)));
+        overrides.push(Box::new(|s| s.telemetry.WRITE_OVERLAY = true));
     }
 
-    let settings = config::initialize(resolve_settings(
-        args.profile.as_deref(),
-        &overrides,
-        false,
-    )?);
+    let settings = config::initialize(config::resolve(args.profile.as_deref(), overrides, false)?);
     pin_runtime(&settings)?;
 
     if args.dump_settings {
-        println!("{}", format_dump(&settings));
-        return Ok(());
+        // The dump prints every setting *by name*, so it exists only where the
+        // name table does. A `dist` build removed that table on purpose.
+        #[cfg(feature = "introspection")]
+        {
+            println!("{}", config::format_dump(&settings));
+            return Ok(());
+        }
+        #[cfg(not(feature = "introspection"))]
+        {
+            return Err("--dump-settings is unavailable in this build: it was \
+                        compiled without the introspection feature, which is what \
+                        keeps the settings field names out of the binary"
+                .into());
+        }
     }
 
     let realtime = args.realtime;

@@ -14,6 +14,19 @@ path = "src/main.rs"
 name = "make_clip"
 path = "src/bin/make_clip.rs"
 
+[features]
+# Name-based settings reflection: --dump-settings, name-keyed overrides, the
+# apply()/VOLATILE runtime contract, and the derived Debug impls on the settings
+# structs. On by default, so dev, release and the test suite behave as before.
+#
+# It is a feature at all because it is the sole source of the settings *field
+# name* strings (IMAGE_POINTS, FRAME_WIDTH, ...) in the binary -- the schema a
+# reverse engineer would otherwise get for free (T2 of docs/re_scoring.md). The
+# shipped dist build turns it off (scripts/build.sh passes --no-default-features)
+# so those strings never ship. See src/config/mod.rs for the split.
+default = ["introspection"]
+introspection = []
+
 [dependencies]
 # The same native libraries the Python calls. This is the point of the port:
 # roughly three quarters of the frame is already inside these two, and that
