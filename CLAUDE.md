@@ -75,8 +75,14 @@ Before shipping:
 python3 tools/check_binary.py target/dist/kerbside --strict
 ```
 
-Profiles: `dev` → `target/debug`, `release` → benchmarking, `dist` → shipped
-(same codegen as `release`, plus `strip` and nightly's `-Zlocation-detail=none`).
+Profiles: `dev` → `target/debug`, `release` → benchmarking, `dist` → shipped.
+`dist` is the hardened, **obfuscated** artefact and carries four layers at once:
+`strip`; `--no-default-features` (drops the settings-schema field-name strings);
+`-Zbuild-std` + `panic_immediate_abort` (drops the residual `/rustc/…` std paths
+and the panic-machinery strings); and an **OLLVM pass plugin** via `-Zllvm-plugins`
+that flattens/obscures the control flow of the kerbside crate only. See BUILD.md →
+"The dist profile", and respect the **LLVM-version coupling** invariant below when
+bumping the toolchain. `release`/`dev` use the default toolchain and none of this.
 `bench.sh` honours `BINARY=target/dist/kerbside` — benchmark whatever you ship.
 
 ## Architecture
@@ -139,13 +145,31 @@ versions must match the Python's (`opencv-python-headless==4.13.0.92`,
 substitute pure-Rust reimplementations — three quarters of the frame is inside
 them and that share is meant to cost the same from both languages.
 
+**The obfuscated `dist` pins its toolchain to the plugin's LLVM.** `-Zllvm-plugins`
+loads the OLLVM (Pluto) pass plugin into the LLVM that rustc itself carries, so the
+plugin must be built against that exact LLVM major. `scripts/build.sh` therefore
+pins `OBF_TOOLCHAIN` (currently `nightly-2025-06-15`, LLVM 20 — also the oldest
+nightly that still satisfies the deps' MSRV of rustc ≥ 1.88) to the committed
+`OBF_PLUGIN` (`hardening/Pluto-llvm20.so`), and **refuses** to build `dist` if the
+toolchain, its `rust-src`, the plugin, or `policy.json` is missing — it does not
+silently fall back to a non-obfuscated binary. Bumping the nightly means rebuilding
+the plugin against the new LLVM (needs that LLVM's `-dev` headers, from apt.llvm.org
+since Debian lags) and updating both variables together; a plugin built against a
+different LLVM will not load. Do not "simplify" this back to the default nightly.
+The selective `policy.json` (flatten the crown functions, `bcf`+`sub` elsewhere,
+`gle` on the module) lives in the package root because Pluto reads it from the CWD.
+
 ### Deliberate non-goals
 
 `--gc-stats` reports that there is no tracing collector, rather than being
 removed — "the pauses are gone" is the headline result. `tuning.rs` values and
-`config/calibration.rs`'s survey numbers remain readable in a release build; the
-port changes the *names*, not the values, and the report records that distinction.
-`model/vehicle.onnx` is copied next to the binary by `build.rs`, not embedded.
+`config/calibration.rs`'s survey numbers **remain readable even in the obfuscated
+`dist`**: OLLVM flattens the control flow (the algorithm, A1) but leaves `f64`
+constants as plaintext immediates in `.rodata`, so the survey table and the tuning
+values are still recoverable. The port changes the *names* and obscures the
+*logic*, not the *values*; hiding those is a separate data-encryption layer, and
+the report records that distinction. `model/vehicle.onnx` is copied next to the
+binary by `build.rs`, not embedded.
 
 ## Conventions
 

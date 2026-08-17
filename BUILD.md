@@ -30,15 +30,19 @@ sudo apt install build-essential pkg-config libopencv-dev clang libclang-dev
 scripts/build.sh
 ```
 
-That is the one-command path: it sources the environment, builds the `dist`
-profile, checks the binary for build-machine paths, and confirms it actually
-starts. `scripts/build.sh release` builds the profile `tools/bench.sh` measures,
-and `scripts/build.sh dev` a debug build.
+That is the one-command path: it sources the environment, builds the **obfuscated
+`dist`** profile (see "The dist profile" below), checks the binary for
+build-machine paths, and confirms it actually starts. `scripts/build.sh release`
+builds the profile `tools/bench.sh` measures, and `scripts/build.sh dev` a debug
+build.
 
-The long form is the same thing:
+The obfuscated `dist` needs a one-time set-up — a pinned nightly whose LLVM
+matches the committed obfuscation plugin, that toolchain's `rust-src`, and the
+matching LLVM `-dev` headers — all documented in "The dist profile". `release`
+and `dev` need none of it, and their long form is just:
 
 ```bash
-source scripts/env-linux.sh && cargo build --profile dist
+source scripts/env-linux.sh && cargo build --profile release
 ```
 
 ### ONNX Runtime on the Pi
@@ -270,55 +274,82 @@ Two things to know:
 scripts/build.sh
 ```
 
-Identical code generation to `release` -- same `opt-level`, same LTO, so timings
-carry over -- with the symbol table stripped, **and built on nightly for one
-flag**: `-Zlocation-detail=none`.
+Same `opt-level` and LTO as `release`, plus **four hardening layers applied
+together** — this is the shipped, obfuscated artefact:
 
-That flag is the only way to *remove* panic-site source paths rather than
-rewrite them. `--remap-path-prefix` turns a path under your home directory into
-`/cargo\registry\...\ndarray-0.17.2\src\impl_constructors.rs`; the flag makes it
-nothing at all. Panics still report their message, they just no longer name the
-line that raised them.
+1. **`strip`** — the symbol table (an ELF carries it in the file; there is no
+   `.pdb` to leave behind, unlike MSVC).
+2. **`--no-default-features`** — drops the `introspection` feature, so the
+   settings *field-name* strings (`IMAGE_POINTS`, `FRAME_WIDTH`, …) and the
+   derived `Debug` labels — the schema a reverse engineer would otherwise get
+   for free — never reach the binary.
+3. **`-Zbuild-std` + `panic_immediate_abort` + `-Zlocation-detail=none`** —
+   rebuilds `std` without its panic machinery and drops panic-site source
+   paths. This *removes* the residual `/rustc/<commit>/library/...` paths that
+   `--remap-path-prefix` can only anonymise, and the panic-message formatting
+   strings with them.
+4. **`-Zllvm-plugins=<Pluto>`** — an OLLVM New-PM pass plugin (bogus control
+   flow + control-flow flattening + instruction substitution + global
+   encryption) applied, via `cargo rustc -- …`, to the **kerbside crate only**;
+   `std` and the dependencies are not obfuscated. This obscures the algorithm
+   and stage order (target A1) so recovering intent is expensive even from a
+   memory dump — the part a language port is actually meant to move.
 
-Measured on this project:
+Measured on this project (obfuscated `dist`):
 
-| build | source paths in the binary | size |
-| --- | --- | --- |
-| untreated | 167, about 92 naming the builder's home directory | 929 KB |
-| `release` (stable, remap only) | 133, none naming a person or machine | 894 KB |
-| `dist` (nightly) | 53, all from the precompiled standard library | 822 KB |
+| property | value |
+| --- | --- |
+| residual build-machine / std source paths | **0** (was 53 before `-Zbuild-std`) |
+| settings field-name strings | gone |
+| conditional branches in `.text` | **17 748** vs 8 336 un-obfuscated (+113%) |
+| size | ~922 KB (obfuscation roughly doubles a stripped un-obfuscated dist) |
+| result-CSV reproduction | **byte-identical `sha256`** to the clean build — passes the oracle |
+| frame-time cost of obfuscation | **≈ +0.08 %** (the obfuscatable code is ~0.3 % of the frame; 99 % is native OpenCV/ONNX) |
 
-The 53 survivors are `/rustc/<commit>/library/...` and `/rust/deps/...`, which
-ship inside the precompiled `std` with their paths already anonymised by the
-Rust project. Removing those too needs `-Zbuild-std` with
-`panic_immediate_abort`, which costs every panic message in the program; that
-was judged not worth it, and the decision belongs in the report rather than
-buried in a build flag.
-
-Verify with `--strict`, which counts what is left and says where each kind comes
-from:
+Verify the path check with `--strict`:
 
 ```bash
 python3 tools/check_binary.py target/dist/kerbside --strict
 ```
 
-`scripts/build.sh` falls back to the default toolchain with a warning if nightly
-is absent, so the build never breaks -- it just produces the `release`-grade
-result. Install nightly with:
+#### One-time set-up and the LLVM-version coupling
+
+`-Zllvm-plugins` loads the plugin into the LLVM **that rustc itself carries**, so
+the plugin must be built against that exact LLVM major. `scripts/build.sh` pins
+its own toolchain and plugin for `dist` (overridable via `OBF_TOOLCHAIN` /
+`OBF_PLUGIN` / `OBF_POLICY`) and **refuses to build — it does not silently fall
+back** — if any of the toolchain, its `rust-src`, the plugin, or `policy.json`
+is missing. Current pin: `nightly-2025-06-15` (rustc 1.89, **LLVM 20** — also the
+oldest nightly that still satisfies the deps' MSRV of rustc ≥ 1.88), with the
+plugin `hardening/Pluto-llvm20.so` built against LLVM 20.
 
 ```bash
-rustup toolchain install nightly --profile minimal
+# 1. the matched nightly + rust-src (for -Zbuild-std)
+rustup toolchain install nightly-2025-06-15 --profile minimal
+rustup component add rust-src --toolchain nightly-2025-06-15
+# 2. that LLVM's dev headers (Debian packages lag; use apt.llvm.org)
+echo 'deb http://apt.llvm.org/trixie/ llvm-toolchain-trixie-20 main' | sudo tee /etc/apt/sources.list.d/llvm20.list
+sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-20-dev
+# 3. build the Pluto backend of lich4/ollvm-pass against it -> Pluto.so
+#    (LLVM_DIR=/usr/lib/llvm-20/lib/cmake/llvm; cmake -S pluto -G Ninja -B build; cmake --build build)
 ```
+
+**When you bump the nightly, you must rebuild the plugin against the new rustc's
+LLVM and update `OBF_TOOLCHAIN`/`OBF_PLUGIN` together** — a plugin built against a
+different LLVM will not load. This coupling is deliberate and is called out in
+`CLAUDE.md` as an invariant.
 
 Because `dist` is built by a different compiler than `release`, **benchmark
 whatever you ship**. `bench.sh` takes an override:
 
 ```bash
 BINARY=target/dist/kerbside tools/bench.sh --frames 3000
-``` It is a separate profile rather
-than the default because stripping is one of the variables the
-reverse-engineering assessment exists to *measure*: build both, record how long
-each takes to reverse, and report the difference.
+```
+
+It is a separate profile rather than the default because stripping and
+obfuscation are among the variables the reverse-engineering assessment exists to
+*measure*: build both, record how long each takes to reverse, and report the
+difference.
 
 Stripping does much more on the Pi than on Windows. An ELF binary carries its
 symbol table in the file; MSVC keeps names in a separate `.pdb` that is simply
@@ -331,16 +362,22 @@ Checked on the current build:
 
 | | |
 | --- | --- |
-| Build-machine paths | gone |
-| Tuning constant *names* (`GATE_COAST_MARGIN_KPH`) | gone |
+| Build-machine paths and std `/rustc/…` paths | gone (`--remap-path-prefix` + `-Zbuild-std`) |
+| Symbols | gone (`strip`) |
+| Settings schema — field *names* (`IMAGE_POINTS`, `GATE_COAST_MARGIN_KPH`) | gone (`--no-default-features` + strip) |
+| Algorithm / stage order (control flow) | **obscured** — OLLVM flattening, +113% branches |
 | Tuning constant *values* (`1.85`) | present, as immediates -- see `tuning.rs` |
 | The survey (`calibration.rs`) | present, as `f64` literals in `.rodata` |
 | `vehicle.onnx` | a plain file next to the binary; the port does not address this |
 | Panic and usage message text | present, and deliberately: a device that cannot explain a failure is worse |
 
-The last three are on the assessment's list and are not solved by any language
-port. Say so in the report rather than letting a clean `strings` output imply
-otherwise.
+The obfuscation moves the **control flow** (the algorithm and stage order): it is
+flattened and padded with bogus paths, so recovering *intent* is expensive even
+from a memory dump. It does **not** touch the **data** — the tuning values, the
+survey and `vehicle.onnx` remain readable `f64`s / a plain file, because a code
+obfuscator flattens logic, not constants. Those three are on the assessment's
+list and are a separate data-encryption problem; say so in the report rather than
+letting a clean `strings` output imply otherwise.
 
 ## Cross-checking the two arms
 
