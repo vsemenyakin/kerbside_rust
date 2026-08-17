@@ -1,0 +1,13 @@
+{
+    "globals": {},
+    "policy_map": {
+        "m":     { "enable-idc": false, "enable-gle": true },
+        "crown": { "enable-fla": true,  "enable-bcf": true, "enable-sub": true, "enable-mba": false },
+        "rest":  { "enable-fla": false, "enable-bcf": true, "enable-sub": true, "enable-mba": false }
+    },
+    "policies": [
+        { "module": ".*", "policy": "m" },
+        { "module": ".*", "func": ".*", "policy": "rest" },
+        { "module": ".*", "func": ".*(speed|gate|associat|pipeline|geometry|homograph|contact|blob|score|calib|tuning|fit|zone|survey).*", "policy": "crown" }
+    ]
+}

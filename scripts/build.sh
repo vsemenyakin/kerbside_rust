@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build on Linux / Raspberry Pi OS, and prove the result carries no leaks.
 #
-#     scripts/build.sh              dist profile -- what you ship
+#     scripts/build.sh              dist profile -- what you ship (OBFUSCATED)
 #     scripts/build.sh release      for benchmarking; tools/bench.sh looks here
 #     scripts/build.sh dev          debug build, for development only
 #
@@ -10,15 +10,45 @@
 # `--remap-path-prefix` flag that silently stops being passed is exactly the
 # kind of regression nobody notices until the artefact is already distributed.
 #
-# Nothing here is required: `source scripts/env-linux.sh` followed by
-# `cargo build --profile dist` does the same thing. This exists so it is one
-# command and the check cannot be forgotten.
+# The dist profile is the shipped artefact and now carries THREE hardening
+# layers at once:
+#   * strip + --no-default-features + build-std   -- removes names, the settings
+#       schema, the source paths and the panic message strings (T2 leak);
+#   * -Zllvm-plugins=<Pluto>                      -- OLLVM control-flow obfuscation
+#       (bogus flow + flattening + substitution) applied to the kerbside crate,
+#       so the algorithm/stage order (A1) is expensive to recover even from a
+#       memory dump. Applied via `cargo rustc -- ...` so ONLY the kerbside crate
+#       pays it; std and the dependencies are not obfuscated.
+#
+# LLVM-version coupling (important): -Zllvm-plugins loads a pass plugin into the
+# LLVM that rustc itself carries, so the plugin MUST be built against that exact
+# LLVM major. The obfuscated dist therefore pins its own toolchain (OBF_TOOLCHAIN)
+# whose LLVM matches the committed plugin (OBF_PLUGIN). Bump both together.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Make the rust toolchain reachable even from a non-login shell (cron/CI/ssh
+# exec), where ~/.cargo/bin may not be on PATH yet.
+if ! command -v rustup >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/.cargo/env"
+fi
+
 PROFILE="${1:-dist}"
+
+# --- obfuscation configuration (dist only) -------------------------------
+# Overridable from the environment. Defaults match what was built on this board.
+#   OBF_TOOLCHAIN  a rustup toolchain whose bundled LLVM == the plugin's LLVM,
+#                  and which satisfies the deps' MSRV (opencv/ort need >= 1.88).
+#   OBF_PLUGIN     the Pluto pass-plugin .so, built against that same LLVM.
+#   OBF_POLICY     Pluto reads "policy.json" from the working directory; this is
+#                  the checked-in selective policy (flatten crown functions,
+#                  bcf+sub elsewhere, gle on the module).
+OBF_TOOLCHAIN="${OBF_TOOLCHAIN:-nightly-2025-06-15}"
+OBF_PLUGIN="${OBF_PLUGIN:-$HOME/Desktop/kerbside_rust/hardening/Pluto-llvm20.so}"
+OBF_POLICY="${OBF_POLICY:-policy.json}"
 
 # Cargo's profile names and its output directories do not match for the one
 # built-in debug profile: `--profile dev` writes to target/debug. Everything
@@ -43,85 +73,90 @@ if [[ "${RUSTFLAGS:-}" != *remap-path-prefix* ]]; then
 fi
 
 # --- toolchain -----------------------------------------------------------
-# The dist profile builds with nightly for two things that stable cannot do,
-# and both are the difference between anonymising a leak and removing it:
+# The dist profile builds with a pinned nightly for three things stable cannot
+# do, and each is the difference between anonymising a leak and removing it:
 #
 #   * -Zlocation-detail=none              drops the source file+line of every
-#                                         panic site (src/detect/detector.rs and
-#                                         friends). --remap-path-prefix can only
-#                                         rewrite those, not delete them.
+#                                         panic site.
 #   * -Zbuild-std + panic_immediate_abort rebuilds std without its panic
-#                                         machinery, which is where the residual
-#                                         /rustc/... paths and the panic *message
-#                                         strings* come from. Needs the rust-src
-#                                         component and forces --target.
+#                                         machinery -- removes /rustc/... paths
+#                                         and the panic *message strings*.
+#   * -Zllvm-plugins=<Pluto>              OLLVM obfuscation of the kerbside crate.
 #
-# There is no stable fallback for either, so when nightly (or rust-src) is
-# missing we REFUSE rather than quietly shipping the leaky binary. Build the
-# un-hardened release profile deliberately if that is what you want.
-#
-# Other profiles use whatever toolchain is default, because they are not what
-# gets shipped. dist's codegen now diverges from release (panic = "abort"), so
-# if you ship dist, benchmark dist:
-#     BINARY=target/dist/kerbside tools/bench.sh
+# There is no stable fallback, so when the pinned toolchain / rust-src / plugin /
+# policy are missing we REFUSE rather than quietly shipping an un-hardened binary.
 CARGO_ARGS=()
 BUILD_STD_ARGS=()
+RUSTC_PLUGIN_ARGS=()
 HOST_TRIPLE=""
 if [[ "$PROFILE" == "dist" ]]; then
-    if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
-        echo "REFUSING TO BUILD: the dist profile requires the nightly toolchain." >&2
-        echo "  It removes the first-party source paths (src/detect/detector.rs and" >&2
-        echo "  friends) and the panic message strings; stable can only anonymise" >&2
-        echo "  them. Install it:" >&2
-        echo "    rustup toolchain install nightly --profile minimal" >&2
-        echo "    rustup component add rust-src --toolchain nightly" >&2
-        echo "  Or build the un-hardened profile for development or benchmarking:" >&2
-        echo "    scripts/build.sh release" >&2
+    if ! rustup toolchain list 2>/dev/null | grep -q "^${OBF_TOOLCHAIN}"; then
+        echo "REFUSING TO BUILD: the dist profile needs the pinned toolchain '${OBF_TOOLCHAIN}'." >&2
+        echo "  Its LLVM must match the obfuscation plugin's LLVM. Install it:" >&2
+        echo "    rustup toolchain install ${OBF_TOOLCHAIN} --profile minimal" >&2
+        echo "    rustup component add rust-src --toolchain ${OBF_TOOLCHAIN}" >&2
+        echo "  Or build the un-hardened profile:  scripts/build.sh release" >&2
         exit 1
     fi
-    if ! rustup component list --toolchain nightly 2>/dev/null \
+    if ! rustup component list --toolchain "${OBF_TOOLCHAIN}" 2>/dev/null \
             | grep -q '^rust-src .*(installed)'; then
-        echo "REFUSING TO BUILD: -Zbuild-std needs the rust-src component on nightly." >&2
-        echo "    rustup component add rust-src --toolchain nightly" >&2
+        echo "REFUSING TO BUILD: -Zbuild-std needs rust-src on ${OBF_TOOLCHAIN}." >&2
+        echo "    rustup component add rust-src --toolchain ${OBF_TOOLCHAIN}" >&2
+        exit 1
+    fi
+    if [[ ! -f "$OBF_PLUGIN" ]]; then
+        echo "REFUSING TO BUILD: obfuscation plugin not found: $OBF_PLUGIN" >&2
+        echo "  Build it (Pluto backend of lich4/ollvm-pass) against the LLVM that" >&2
+        echo "  ${OBF_TOOLCHAIN} carries, or point OBF_PLUGIN at it. See hardening/." >&2
+        exit 1
+    fi
+    if [[ ! -f "$OBF_POLICY" ]]; then
+        echo "REFUSING TO BUILD: obfuscation policy not found: $OBF_POLICY" >&2
+        echo "  Pluto reads it from the working directory. Restore policy.json." >&2
         exit 1
     fi
     # build-std must know the concrete target; there is no host default for it.
-    HOST_TRIPLE="$(rustc +nightly -vV | awk '/^host: /{print $2}')"
+    HOST_TRIPLE="$(rustc "+${OBF_TOOLCHAIN}" -vV | awk '/^host: /{print $2}')"
     if [[ -z "$HOST_TRIPLE" ]]; then
-        echo "REFUSING TO BUILD: could not determine the host target triple from" >&2
-        echo "  'rustc +nightly -vV'." >&2
+        echo "REFUSING TO BUILD: could not determine the host target triple." >&2
         exit 1
     fi
-    CARGO_ARGS+=("+nightly")
-    # -Cpanic=immediate-abort is the current spelling (nightly 1.99): the old
-    # -Zbuild-std-features=panic_immediate_abort was promoted to a real panic
-    # strategy. It needs -Zunstable-options, and it needs core rebuilt, which is
-    # what -Zbuild-std does. Set here rather than in Cargo.toml because the
-    # manifest opt-in (cargo-features = ["panic-immediate-abort"]) breaks stable
-    # cargo -- and hence every `cargo test --release`. It overrides the dist
-    # profile's stable-safe panic = "abort".
-    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort"
+    CARGO_ARGS+=("+${OBF_TOOLCHAIN}")
+    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none"
     BUILD_STD_ARGS+=(
         "--target" "$HOST_TRIPLE"
         "-Zbuild-std=std,panic_abort"
+        # Old spelling of immediate-abort: rebuilds std without panic strings.
+        # (The newer -Cpanic=immediate-abort only exists on later nightlies.)
+        "-Zbuild-std-features=panic_immediate_abort"
         # Drop the introspection feature so the settings field-name strings
         # (IMAGE_POINTS, FRAME_WIDTH, ...) and the derived Debug labels never
         # reach the shipped binary. dev/release keep it (and --dump-settings).
         "--no-default-features"
     )
-    echo "toolchain: nightly"
-    echo "  -Zlocation-detail=none               (drop panic-site source paths)"
-    echo "  -Cpanic=immediate-abort + build-std  (drop std paths and panic strings)"
-    echo "  --no-default-features                (drop settings field-name strings)"
+    # Applied to the kerbside crate only (after `--`), never to std/deps.
+    RUSTC_PLUGIN_ARGS+=("-Z" "llvm-plugins=${OBF_PLUGIN}")
+    echo "toolchain: ${OBF_TOOLCHAIN}  (LLVM matched to plugin)"
+    echo "  -Zlocation-detail=none                    (drop panic-site source paths)"
+    echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
+    echo "  --no-default-features                     (drop settings field-name strings)"
+    echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation, policy: $OBF_POLICY)"
     echo "  --target $HOST_TRIPLE"
 fi
 
 echo
 echo "== building profile '$PROFILE' -> target/$OUT_DIR =="
-if ! cargo "${CARGO_ARGS[@]}" build --profile "$PROFILE" "${BUILD_STD_ARGS[@]}"; then
-    echo
-    echo "BUILD FAILED" >&2
-    exit 1
+if [[ "$PROFILE" == "dist" ]]; then
+    # cargo rustc passes the trailing args to the FINAL crate (kerbside) only,
+    # so the obfuscation plugin never touches std or the dependencies.
+    if ! cargo "${CARGO_ARGS[@]}" rustc --profile dist "${BUILD_STD_ARGS[@]}" \
+            --bin kerbside -- "${RUSTC_PLUGIN_ARGS[@]}"; then
+        echo; echo "BUILD FAILED" >&2; exit 1
+    fi
+else
+    if ! cargo "${CARGO_ARGS[@]}" build --profile "$PROFILE" "${BUILD_STD_ARGS[@]}"; then
+        echo; echo "BUILD FAILED" >&2; exit 1
+    fi
 fi
 
 # build-std forces --target, which nests the output under target/<triple>/.
