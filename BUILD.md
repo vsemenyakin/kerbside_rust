@@ -99,6 +99,78 @@ sudo cpupower frequency-set -g performance
 
 ---
 
+## Fresh-machine setup — the obfuscated `dist` from a clean checkout
+
+From a freshly installed **Raspberry Pi OS 64-bit (trixie)** and a clean checkout,
+here is the whole path to `scripts/build.sh` producing the obfuscated `dist`.
+
+**The checkout already ships** everything version-controlled: the source,
+`model/vehicle.onnx`, the selective `policy.json`, and the prebuilt obfuscation
+plugin `vendor/Pluto-llvm20.so` (stripped, ~1.3 MB, aarch64 + LLVM 20). You do
+**not** build the plugin. Two things are deliberately *not* in the repo and must
+be fetched: the Rust toolchain and the ONNX Runtime shared library.
+
+**1. System packages.** Build tools + OpenCV (+ its bindgen's libclang) + the two
+shared libraries the vendored plugin loads at run time (`libz3.so.4`; the LLVM
+runtime comes in step 2):
+
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libopencv-dev clang libclang-dev \
+                    libz3-4 curl wget
+```
+
+Note this is lighter than a plugin build: no `cmake`, `ninja`, `libz3-dev` or
+`llvm-*-dev` — those are only needed to *rebuild* the plugin (see "The dist
+profile" → the LLVM-version coupling).
+
+**2. The LLVM 20 runtime** the plugin links (`libLLVM.so.20.1`). Debian's newest
+packaged LLVM is 19, so take the *runtime* package (not `-dev`) from apt.llvm.org:
+
+```bash
+wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+  | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+echo 'deb http://apt.llvm.org/trixie/ llvm-toolchain-trixie-20 main' \
+  | sudo tee /etc/apt/sources.list.d/llvm20.list
+sudo apt update && sudo apt install -y libllvm20
+```
+
+**3. Rust: rustup + the pinned nightly + `rust-src`** (for `-Zbuild-std`):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+. "$HOME/.cargo/env"
+rustup toolchain install nightly-2025-06-15 --profile minimal
+rustup component add rust-src --toolchain nightly-2025-06-15
+```
+
+**4. ONNX Runtime** — loaded at run time, not linked, and not in `apt`. Extract the
+official aarch64 build into the package root; `scripts/env-linux.sh` finds
+`onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so` there automatically:
+
+```bash
+cd path/to/kerbside_rust
+wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz
+tar xzf onnxruntime-linux-aarch64-1.26.0.tgz
+```
+
+**5. Build:**
+
+```bash
+scripts/build.sh
+```
+
+That produces `target/dist/kerbside` — stripped, introspection removed, std paths
+and panic strings gone, and control-flow obfuscated. Verify:
+
+```bash
+python3 tools/check_binary.py target/dist/kerbside --strict
+target/dist/kerbside --replay --frames 1500 --out /tmp/c.csv   # reproduces the CSV
+```
+
+`scripts/build.sh release` and `scripts/build.sh dev` need only steps 1, 3 (any
+toolchain) and 4 — none of the obfuscation set-up.
+
 ## Windows (x86-64, MSVC)
 
 You need three things the toolchain will not find on its own.
@@ -312,32 +384,37 @@ Verify the path check with `--strict`:
 python3 tools/check_binary.py target/dist/kerbside --strict
 ```
 
-#### One-time set-up and the LLVM-version coupling
+#### The LLVM-version coupling (and rebuilding the plugin)
 
 `-Zllvm-plugins` loads the plugin into the LLVM **that rustc itself carries**, so
-the plugin must be built against that exact LLVM major. `scripts/build.sh` pins
-its own toolchain and plugin for `dist` (overridable via `OBF_TOOLCHAIN` /
+the plugin must match that LLVM major exactly. The plugin is therefore **vendored
+in the repo** — `vendor/Pluto-llvm20.so`, stripped to ~1.3 MB, built against the
+LLVM of the pinned toolchain — so a normal checkout builds `dist` without a plugin
+build. `scripts/build.sh` pins both (overridable via `OBF_TOOLCHAIN` /
 `OBF_PLUGIN` / `OBF_POLICY`) and **refuses to build — it does not silently fall
-back** — if any of the toolchain, its `rust-src`, the plugin, or `policy.json`
-is missing. Current pin: `nightly-2025-06-15` (rustc 1.89, **LLVM 20** — also the
-oldest nightly that still satisfies the deps' MSRV of rustc ≥ 1.88), with the
-plugin `hardening/Pluto-llvm20.so` built against LLVM 20.
+back** — if the toolchain, its `rust-src`, the plugin, or `policy.json` is missing.
+Current pin: `nightly-2025-06-15` (rustc 1.89, **LLVM 20** — also the oldest
+nightly that still satisfies the deps' MSRV of rustc ≥ 1.88).
+
+For a from-nothing install, see **"Fresh-machine setup"** above; it does not build
+the plugin. You only rebuild it when you **bump the toolchain to a different LLVM**,
+and then you must update `OBF_TOOLCHAIN` / `OBF_PLUGIN` together — a plugin built
+against a different LLVM will not load. The coupling is deliberate and is called
+out in `CLAUDE.md` as an invariant. To rebuild:
 
 ```bash
-# 1. the matched nightly + rust-src (for -Zbuild-std)
-rustup toolchain install nightly-2025-06-15 --profile minimal
-rustup component add rust-src --toolchain nightly-2025-06-15
-# 2. that LLVM's dev headers (Debian packages lag; use apt.llvm.org)
-echo 'deb http://apt.llvm.org/trixie/ llvm-toolchain-trixie-20 main' | sudo tee /etc/apt/sources.list.d/llvm20.list
-sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm-20-dev
-# 3. build the Pluto backend of lich4/ollvm-pass against it -> Pluto.so
-#    (LLVM_DIR=/usr/lib/llvm-20/lib/cmake/llvm; cmake -S pluto -G Ninja -B build; cmake --build build)
+# the new LLVM's dev headers (Debian lags -> apt.llvm.org), plus cmake/ninja/z3
+sudo apt-get install -y --no-install-recommends llvm-20-dev cmake ninja-build libz3-dev
+git clone --depth 1 https://github.com/lich4/ollvm-pass && cd ollvm-pass
+# three fixes the upstream needs to compile with Linux/gcc:
+sed -i 's|#include "CryptoUtils.h"|#include "CryptoUtils.h"\n#include <queue>|' pluto/MBAUtils.cpp
+sed -i 's|#include <fstream>|#include <fstream>\n#include <filesystem>|' common.h
+sed -i 's|match_path = weakly_canonical(match_path);|match_path = filesystem::weakly_canonical(match_path);|' PassUtils.h
+export LLVM_DIR=/usr/lib/llvm-20/lib/cmake/llvm
+cmake -S pluto -G Ninja -B build && cmake --build build
+strip --strip-unneeded build/Pluto.so                       # 22 MB -> ~1.3 MB
+cp build/Pluto.so /path/to/repo/vendor/Pluto-llvm20.so      # rename to the new LLVM
 ```
-
-**When you bump the nightly, you must rebuild the plugin against the new rustc's
-LLVM and update `OBF_TOOLCHAIN`/`OBF_PLUGIN` together** — a plugin built against a
-different LLVM will not load. This coupling is deliberate and is called out in
-`CLAUDE.md` as an invariant.
 
 Because `dist` is built by a different compiler than `release`, **benchmark
 whatever you ship**. `bench.sh` takes an override:

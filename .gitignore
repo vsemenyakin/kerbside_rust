@@ -2,3 +2,6 @@
 /telemetry/
 /clips/
 *.mp4
+/onnxruntime-linux-aarch64-*/
+*.tgz
+__pycache__/

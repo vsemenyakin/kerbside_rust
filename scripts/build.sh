@@ -47,7 +47,11 @@ PROFILE="${1:-dist}"
 #                  the checked-in selective policy (flatten crown functions,
 #                  bcf+sub elsewhere, gle on the module).
 OBF_TOOLCHAIN="${OBF_TOOLCHAIN:-nightly-2025-06-15}"
-OBF_PLUGIN="${OBF_PLUGIN:-$HOME/Desktop/kerbside_rust/hardening/Pluto-llvm20.so}"
+# The plugin is vendored in-repo (stripped, ~1.3 MB) so a fresh checkout needs no
+# plugin build. It is aarch64 + LLVM 20 specific and loads libLLVM.so.20.1 +
+# libz3.so.4 at run time -- see BUILD.md "Fresh-machine setup". $PWD is the repo
+# root here (we cd'd to it above).
+OBF_PLUGIN="${OBF_PLUGIN:-$PWD/vendor/Pluto-llvm20.so}"
 OBF_POLICY="${OBF_POLICY:-policy.json}"
 
 # Cargo's profile names and its output directories do not match for the one
