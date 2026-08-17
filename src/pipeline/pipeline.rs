@@ -259,9 +259,9 @@ impl Pipeline {
         // rather than tracking the results.
         //
         // (The Python spells the threshold inline; it is the same number as
-        // `tuning::FRAME_MAX_FOREGROUND_RATIO`, named here so the two cannot
+        // `tuning::frame_max_foreground_ratio()`, named here so the two cannot
         // drift apart.)
-        if foreground_ratio > tuning::FRAME_MAX_FOREGROUND_RATIO || frame.frame_id < self.warm_frames
+        if foreground_ratio > tuning::frame_max_foreground_ratio() || frame.frame_id < self.warm_frames
         {
             blobs.clear();
         }

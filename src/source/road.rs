@@ -306,7 +306,7 @@ impl RoadScene {
         }
 
         // The survey marks themselves, painted on the road as they would be.
-        for (x, y) in [(0.0, 0.0), (7.3, 0.0), (7.3, 40.0), (0.0, 40.0)] {
+        for (x, y) in [(crate::encf!(0.0), crate::encf!(0.0)), (crate::encf!(7.3), crate::encf!(0.0)), (crate::encf!(7.3), crate::encf!(40.0)), (crate::encf!(0.0), crate::encf!(40.0))] {
             let (px, py) = self.project(x, y);
             opencv::imgproc::circle(
                 &mut canvas,

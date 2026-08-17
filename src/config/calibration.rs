@@ -22,32 +22,36 @@ crate::settings_group! {
         // Image coordinates of the four survey marks, in FULL-resolution
         // pixels, clockwise from the near-left. These correspond to
         // WORLD_POINTS below.
+        // Each coordinate is encrypted at rest (crate::encf!): the survey no
+        // longer appears as a contiguous block of f64 literals in .rodata. The
+        // decode happens once, in Default::default(), so cal.IMAGE_POINTS reads
+        // exactly as before -- see crate::crypt for the mechanism and its limit.
         IMAGE_POINTS: Vec<(f64, f64)> = vec![
-            (352.0, 690.0),
-            (928.0, 690.0),
-            (742.0, 388.0),
-            (538.0, 388.0),
+            (crate::encf!(352.0), crate::encf!(690.0)),
+            (crate::encf!(928.0), crate::encf!(690.0)),
+            (crate::encf!(742.0), crate::encf!(388.0)),
+            (crate::encf!(538.0), crate::encf!(388.0)),
         ],
         // The same four marks in road coordinates, metres. X across the
         // carriageway, Y along it, origin at the near-left mark.
         WORLD_POINTS: Vec<(f64, f64)> = vec![
-            (0.0, 0.0),
-            (7.3, 0.0),
-            (7.3, 40.0),
-            (0.0, 40.0),
+            (crate::encf!(0.0), crate::encf!(0.0)),
+            (crate::encf!(7.3), crate::encf!(0.0)),
+            (crate::encf!(7.3), crate::encf!(40.0)),
+            (crate::encf!(0.0), crate::encf!(40.0)),
         ],
 
         // The stretch of road, in metres along Y, over which speed is measured.
         // Starting past the near mark and ending before the far one keeps the
         // fit away from both edges of the calibrated quad, where a small survey
         // error has the most leverage.
-        ZONE_START_M: f64 = 6.0,
-        ZONE_END_M: f64 = 34.0,
+        ZONE_START_M: f64 = crate::encf!(6.0),
+        ZONE_END_M: f64 = crate::encf!(34.0),
 
         // A vehicle's ground-contact point is taken this far up from the bottom
         // of its box, as a fraction of box height. Exactly at the bottom edge
         // picks up the shadow; higher up picks up the bonnet, which is not on
         // the road.
-        CONTACT_POINT_RATIO: f64 = 0.06,
+        CONTACT_POINT_RATIO: f64 = crate::encf!(0.06),
     }
 }

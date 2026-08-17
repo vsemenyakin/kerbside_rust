@@ -22,6 +22,7 @@
 //!   allocation must not be optimised away. See [`consumers`].
 
 pub mod config;
+pub mod crypt;
 pub mod consumers;
 pub mod detect;
 pub mod enforce;
