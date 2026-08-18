@@ -531,10 +531,12 @@ impl RoadScene {
     /// Render one frame. Same input -> same bytes, on every machine.
     pub fn render(&self, frame_id: i64) -> Result<(Mat, GroundTruth), String> {
         if !(0..self.frames).contains(&frame_id) {
+            let last = self.frames - 1;
             return Err(format!(
-                "frame {frame_id} is outside this scene (0..{}). The length is \
-                 video.SCENE_FRAMES; raise it, or ask for fewer.",
-                self.frames - 1
+                "{}{frame_id}{}{last}{}",
+                obfstr::obfstr!("frame "),
+                obfstr::obfstr!(" is outside this scene (0.."),
+                obfstr::obfstr!("). The length is video.SCENE_FRAMES; raise it, or ask for fewer."),
             ));
         }
 
