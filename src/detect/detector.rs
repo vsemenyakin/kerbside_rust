@@ -111,7 +111,7 @@ pub fn preprocess(working: &Mat, height: i32, width: i32) -> Result<Array4<f32>,
 /// development.
 fn locate_model(file: &str) -> Result<PathBuf, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(dir) = std::env::var("KERBSIDE_MODEL_DIR") {
+    if let Ok(dir) = std::env::var(obfstr::obfstr!("KERBSIDE_MODEL_DIR")) {
         candidates.push(PathBuf::from(dir).join(file));
     }
     if let Ok(exe) = std::env::current_exe() {
@@ -128,15 +128,18 @@ fn locate_model(file: &str) -> Result<PathBuf, String> {
             return Ok(candidate.clone());
         }
     }
+    let looked = candidates
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n  ");
     Err(format!(
-        "{file} was not found. Looked in:\n  {}\nSet KERBSIDE_MODEL_DIR, or build it \
-         in the Python repository with:\n    venv/bin/python tools/export_model.py\n\
-         and copy kerbside/detect/{file} into this project's model/ directory.",
-        candidates
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n  ")
+        "{file}{}{looked}{}{file}{}",
+        obfstr::obfstr!(" was not found. Looked in:\n  "),
+        obfstr::obfstr!("\nSet KERBSIDE_MODEL_DIR, or build it in the Python repository \
+                         with:\n    venv/bin/python tools/export_model.py\nand copy \
+                         kerbside/detect/"),
+        obfstr::obfstr!(" into this project's model/ directory."),
     ))
 }
 
@@ -238,14 +241,16 @@ fn try_init_runtime() -> Result<(), String> {
          \x20   export ORT_DYLIB_PATH=\"$PWD/onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so\"\n\
          Or copy that file next to this binary.").to_string()
     };
+        let looked = candidates
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n  ");
     Err(format!(
-        "{RUNTIME_LIBRARY} was not found. Looked in:\n  {}\n  \
-         and on the system library search path.\n{remedy}\nSee BUILD.md.",
-        candidates
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n  ")
+        "{RUNTIME_LIBRARY}{}{looked}{}{remedy}{}",
+        obfstr::obfstr!(" was not found. Looked in:\n  "),
+        obfstr::obfstr!("\n  and on the system library search path.\n"),
+        obfstr::obfstr!("\nSee BUILD.md."),
     ))
 }
 

@@ -514,7 +514,9 @@ fn apply_profile(settings: &mut Settings, name: &str) -> Result<(), String> {
         }
         _ => {
             return Err(format!(
-                "unknown profile {name:?}; known: {:?}",
+                "{}{name:?}{}{:?}",
+                obfstr::obfstr!("unknown profile "),
+                obfstr::obfstr!("; known: "),
                 PROFILE_NAMES.as_slice()
             ))
         }
