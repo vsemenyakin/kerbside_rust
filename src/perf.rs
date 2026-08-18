@@ -317,7 +317,7 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     file.flush().map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot flush "), path.display()))?;
 
     let handle = std::thread::Builder::new()
-        .name("perf-writer".into())
+        .name(obfstr::obfstr!("perf-writer").into())
         .spawn(move || {
             let mut out = file;
             loop {

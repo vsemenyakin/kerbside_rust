@@ -228,15 +228,15 @@ fn try_init_runtime() -> Result<(), String> {
 
     // The remedy depends on the platform, so do not print the other one's.
     let remedy = if cfg!(target_os = "windows") {
-        "Rebuild with the environment script, which copies it next to the binary:\n\
+        obfstr::obfstr!("Rebuild with the environment script, which copies it next to the binary:\n\
          \x20   . .\\scripts\\env-windows.ps1\n\x20   cargo build --release\n\
-         Or set ORT_DYLIB_PATH to an ONNX Runtime 1.26 build."
+         Or set ORT_DYLIB_PATH to an ONNX Runtime 1.26 build.").to_string()
     } else {
-        "Fetch the runtime for this architecture and point at it, for example:\n\
+        obfstr::obfstr!("Fetch the runtime for this architecture and point at it, for example:\n\
          \x20   curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz\n\
          \x20   tar xf ort.tgz\n\
          \x20   export ORT_DYLIB_PATH=\"$PWD/onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so\"\n\
-         Or copy that file next to this binary."
+         Or copy that file next to this binary.").to_string()
     };
     Err(format!(
         "{RUNTIME_LIBRARY} was not found. Looked in:\n  {}\n  \

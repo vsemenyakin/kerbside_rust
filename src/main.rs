@@ -32,7 +32,10 @@ use kerbside::pipeline::types::SharedMat;
 use kerbside::pipeline::{live_settings, Pipeline, RawFrame, RunningPipeline};
 use kerbside::source::RoadScene;
 
-const USAGE: &str = "\
+// Was `const USAGE: &str`; a const cannot hold an obfstr! value (it decodes at
+// run time), so this is a function and the help text ships only as ciphertext.
+fn usage() -> String {
+    obfstr::obfstr!("\
 kerbside -- a roadside speed-enforcement camera
 
     --replay            process every frame, in order, as fast as possible (default)
@@ -49,7 +52,8 @@ kerbside -- a roadside speed-enforcement camera
     --threaded          run replay through the pipeline thread rather than inline
     --dump-settings     print settings and exit
     --version           print build and native-library versions, and exit
-";
+").to_string()
+}
 
 #[derive(Default)]
 struct Args {
@@ -77,30 +81,47 @@ fn parse_args() -> Result<Args, String> {
     let mut argv = std::env::args().skip(1);
     while let Some(arg) = argv.next() {
         let mut value = || argv.next().ok_or_else(|| format!("{arg}{}", obfstr::obfstr!(" expects a value")));
-        match arg.as_str() {
-            "--replay" => args.replay = true,
-            "--realtime" => args.realtime = true,
-            "--profile" => args.profile = Some(value()?),
-            "--frames" => args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--frames: ")))?),
-            "--seed" => args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--seed: ")))?),
-            "--limit" => args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--limit: ")))?),
-            "--out" => args.out = value()?,
-            "--overlay" => args.overlay = Some(value()?),
-            "--perf" => args.perf = true,
-            "--perf-dir" => args.perf_dir = Some(value()?),
-            "--gc-stats" => args.gc_stats = true,
-            "--threaded" => args.threaded = true,
-            "--dump-settings" => args.dump_settings = true,
-            "--version" | "-V" => args.version = true,
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                std::process::exit(0);
-            }
-            other => return Err(format!("{}{other}\n\n{USAGE}", obfstr::obfstr!("unknown argument: "))),
+        // if/else with obfstr comparisons rather than a `match` on literals:
+        // a match pattern must be a plain literal, so its text would ship in
+        // .rodata; comparing against an obfstr! value keeps the flag names out.
+        let a = arg.as_str();
+        if a == obfstr::obfstr!("--replay") {
+            args.replay = true;
+        } else if a == obfstr::obfstr!("--realtime") {
+            args.realtime = true;
+        } else if a == obfstr::obfstr!("--profile") {
+            args.profile = Some(value()?);
+        } else if a == obfstr::obfstr!("--frames") {
+            args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--frames: ")))?);
+        } else if a == obfstr::obfstr!("--seed") {
+            args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--seed: ")))?);
+        } else if a == obfstr::obfstr!("--limit") {
+            args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--limit: ")))?);
+        } else if a == obfstr::obfstr!("--out") {
+            args.out = value()?;
+        } else if a == obfstr::obfstr!("--overlay") {
+            args.overlay = Some(value()?);
+        } else if a == obfstr::obfstr!("--perf") {
+            args.perf = true;
+        } else if a == obfstr::obfstr!("--perf-dir") {
+            args.perf_dir = Some(value()?);
+        } else if a == obfstr::obfstr!("--gc-stats") {
+            args.gc_stats = true;
+        } else if a == obfstr::obfstr!("--threaded") {
+            args.threaded = true;
+        } else if a == obfstr::obfstr!("--dump-settings") {
+            args.dump_settings = true;
+        } else if a == obfstr::obfstr!("--version") || a == obfstr::obfstr!("-V") {
+            args.version = true;
+        } else if a == obfstr::obfstr!("-h") || a == obfstr::obfstr!("--help") {
+            println!("{}", usage());
+            std::process::exit(0);
+        } else {
+            return Err(format!("{}{a}\n\n{}", obfstr::obfstr!("unknown argument: "), usage()));
         }
     }
     if args.replay && args.realtime {
-        return Err("--replay and --realtime are mutually exclusive".into());
+        return Err(obfstr::obfstr!("--replay and --realtime are mutually exclusive").into());
     }
     Ok(args)
 }
@@ -137,28 +158,28 @@ fn frame_for(scene: &RoadScene, settings: &Settings, frame_id: i64) -> Result<Ra
 /// path rather than a version string: the crate exposes no version accessor,
 /// and which file was loaded is the thing that actually decides the numbers.
 fn print_version() {
-    println!("kerbside {} ({})", env!("CARGO_PKG_VERSION"), build_profile());
+    println!("{}{} ({})", obfstr::obfstr!("kerbside "), env!("CARGO_PKG_VERSION"), build_profile());
     match opencv::core::get_version_string() {
-        Ok(version) => println!("opencv       {version} (thread pool pinned by settings)"),
-        Err(e) => println!("opencv       unavailable: {e}"),
+        Ok(version) => println!("{}{version}{}", obfstr::obfstr!("opencv       "), obfstr::obfstr!(" (thread pool pinned by settings)")),
+        Err(e) => println!("{}{e}", obfstr::obfstr!("opencv       unavailable: ")),
     }
     match kerbside::detect::probe_runtime() {
         Ok(()) => println!(
-            "onnxruntime  {}",
+            "{}{}",
+            obfstr::obfstr!("onnxruntime  "),
             kerbside::detect::resolved_runtime_path().unwrap_or(obfstr::obfstr!("loaded, path unknown"))
         ),
-        Err(e) => println!("onnxruntime  NOT LOADED
-{e}"),
+        Err(e) => println!("{}{e}", obfstr::obfstr!("onnxruntime  NOT LOADED\n")),
     }
 }
 
-fn build_profile() -> &'static str {
+fn build_profile() -> String {
     // A debug build is several times slower and must never be benchmarked; the
     // bench scripts refuse to record one, and this is how they can tell.
     if cfg!(debug_assertions) {
-        "debug -- NOT valid for benchmarking"
+        obfstr::obfstr!("debug -- NOT valid for benchmarking").to_string()
     } else {
-        "release"
+        obfstr::obfstr!("release").to_string()
     }
 }
 
@@ -207,19 +228,26 @@ fn run() -> Result<(), String> {
         }
         #[cfg(not(feature = "introspection"))]
         {
-            return Err("--dump-settings is unavailable in this build: it was \
+            return Err(obfstr::obfstr!("--dump-settings is unavailable in this build: it was \
                         compiled without the introspection feature, which is what \
-                        keeps the settings field names out of the binary"
+                        keeps the settings field names out of the binary")
                 .into());
         }
     }
 
     let realtime = args.realtime;
+    // Bound to an owned String: an obfstr! result borrows a stack temporary that
+    // is dropped at the end of its `{ }` arm, so it cannot be passed inline.
+    let run_name = if realtime {
+        obfstr::obfstr!("realtime").to_string()
+    } else {
+        obfstr::obfstr!("replay").to_string()
+    };
     perf::configure(
         settings.telemetry.MEASURE_STAGES,
         &settings.telemetry.PERF_DIR,
         settings.telemetry.PERF_FLUSH_MS,
-        if realtime { "realtime" } else { "replay" },
+        &run_name,
     )?;
 
     let scene = RoadScene::new(&settings)?;
@@ -276,9 +304,9 @@ fn run() -> Result<(), String> {
     };
 
     println!("{}", perf::shutdown());
-    println!("wall {wall:.2} s  ({:.1} fps effective)", total as f64 / wall);
-    println!("results {path}  rows {rows}  violations {violations}");
-    println!("sha256 {digest}");
+    println!("{}{wall:.2}{}{:.1}{}", obfstr::obfstr!("wall "), obfstr::obfstr!(" s  ("), total as f64 / wall, obfstr::obfstr!(" fps effective)"));
+    println!("{}{path}{}{rows}{}{violations}", obfstr::obfstr!("results "), obfstr::obfstr!("  rows "), obfstr::obfstr!("  violations "));
+    println!("{}{digest}", obfstr::obfstr!("sha256 "));
     // Deliberately *not* called "tracked containers" like the Python's line.
     // The Python counts GC-tracked dicts, lists and tuples because those are
     // what its collector walks -- including one tuple per contour point. This
@@ -288,8 +316,11 @@ fn run() -> Result<(), String> {
     // nothing. What is comparable is the frame count and the fact that both
     // hold the frames by reference.
     println!(
-        "ring retains {ring_frames} frames, ~{} retained allocations",
-        thousands(ring_containers as u64)
+        "{}{ring_frames}{}{}{}",
+        obfstr::obfstr!("ring retains "),
+        obfstr::obfstr!(" frames, ~"),
+        thousands(ring_containers as u64),
+        obfstr::obfstr!(" retained allocations")
     );
     if args.gc_stats {
         report_gc();
@@ -351,17 +382,20 @@ fn run_realtime(
 /// thread, at a point the program chooses, in bounded time. That is the whole
 /// finding, so it is stated rather than silently omitted.
 fn report_gc() {
-    println!("gc: no tracing collector in this build");
+    println!("{}", obfstr::obfstr!("gc: no tracing collector in this build"));
     println!(
-        "  the evidence record and the ring allocate exactly as the Python's do; \
-         what is gone is the collection pass over them"
+        "{}",
+        obfstr::obfstr!("  the evidence record and the ring allocate exactly as the Python's do; \
+         what is gone is the collection pass over them")
     );
     let counters = perf::counters();
     println!(
-        "  worst frame {:.3} ms over {} frames -- compare against the Python's \
-         gen2 pause distribution",
+        "{}{:.3}{}{}{}",
+        obfstr::obfstr!("  worst frame "),
         counters.max_ms(),
-        counters.frames.load(Ordering::Relaxed)
+        obfstr::obfstr!(" ms over "),
+        counters.frames.load(Ordering::Relaxed),
+        obfstr::obfstr!(" frames -- compare against the Python's gen2 pause distribution")
     );
 }
 
@@ -382,7 +416,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("kerbside: {message}");
+            eprintln!("{}{message}", obfstr::obfstr!("kerbside: "));
             ExitCode::FAILURE
         }
     }
