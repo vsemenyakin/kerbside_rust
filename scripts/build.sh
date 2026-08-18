@@ -119,6 +119,12 @@ if [[ "$PROFILE" == "dist" ]]; then
         echo "  Pluto reads it from the working directory. Restore policy.json." >&2
         exit 1
     fi
+    if [[ ! -f "$PWD/scripts/obf-rustc-wrapper.sh" ]]; then
+        echo "REFUSING TO BUILD: obfuscation rustc wrapper not found:" >&2
+        echo "  $PWD/scripts/obf-rustc-wrapper.sh" >&2
+        echo "  It scopes -Zllvm-plugins to the kerbside crate. Restore it." >&2
+        exit 1
+    fi
     # build-std must know the concrete target; there is no host default for it.
     HOST_TRIPLE="$(rustc "+${OBF_TOOLCHAIN}" -vV | awk '/^host: /{print $2}')"
     if [[ -z "$HOST_TRIPLE" ]]; then
@@ -132,7 +138,18 @@ if [[ "$PROFILE" == "dist" ]]; then
     # plugin in RUSTFLAGS a plain `cargo build` is used instead, and policy.json's
     # func filter (".*kerbside.*") scopes obfuscation to this crate, so std and the
     # dependencies are compiled with the plugin loaded but left untransformed.
-    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none -Zllvm-plugins=${OBF_PLUGIN}"
+    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none"
+    # The obfuscation plugin is loaded ONLY for the kerbside crate, through a
+    # RUSTC_WORKSPACE_WRAPPER -- not globally via RUSTFLAGS. A global
+    # -Zllvm-plugins also loads the plugin into every std crate that -Zbuild-std
+    # recompiles; those compile with a CWD inside the rustup std source tree,
+    # where the plugin cannot find policy.json and prints "Error: conf not found"
+    # for each. cargo calls the workspace wrapper only for workspace members
+    # (never for std or the dependencies), so std and the deps stay plugin-free
+    # (they must not be obfuscated) and the plugin reads policy.json from the repo
+    # root, which is the kerbside crate's own compile CWD.
+    export OBF_PLUGIN
+    export RUSTC_WORKSPACE_WRAPPER="$PWD/scripts/obf-rustc-wrapper.sh"
     BUILD_STD_ARGS+=(
         "--target" "$HOST_TRIPLE"
         "-Zbuild-std=std,panic_abort"
@@ -148,7 +165,7 @@ if [[ "$PROFILE" == "dist" ]]; then
     echo "  -Zlocation-detail=none                    (drop panic-site source paths)"
     echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
     echo "  --no-default-features                     (drop settings field-name strings)"
-    echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation, policy: $OBF_POLICY)"
+    echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
     echo "  --target $HOST_TRIPLE"
 fi
 
