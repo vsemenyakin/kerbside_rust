@@ -11,10 +11,12 @@
 # board does not produce a noisy answer, it produces a confident wrong one, and
 # there is no way to tell from the output file which one you have.
 #
-#     tools/bench.sh [--frames N] [--out DIR] [--baseline PYTHON_PERF_CSV]
+#     tools/bench.sh [--build release|dist] [--frames N] [--out DIR] [--baseline PYTHON_PERF_CSV]
 #
-# BINARY=path/to/kerbside overrides which build is measured, for a copied-out
-# release directory that is not under target/.
+# --build selects which artefact is measured, by name: 'release'
+# (target/release/kerbside, the default) or 'dist' (the shipped, obfuscated
+# build at target/dist/kerbside -- see scripts/build.sh). BINARY=path/to/kerbside
+# still overrides the path directly, for a copied-out directory not under target/.
 #
 # Override a gate with FORCE=1 if you know why you are doing it. The report
 # records that you did.
@@ -28,16 +30,37 @@ OUT="telemetry"
 BASELINE=""
 FORCE="${FORCE:-0}"
 MAX_TEMP_C=65
-BINARY="${BINARY:-target/release/kerbside}"
+BUILD="release"
+BINARY_ENV="${BINARY:-}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --build) BUILD="$2"; shift 2 ;;
         --frames) FRAMES="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --baseline) BASELINE="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+# --- which build to measure ---------------------------------------------
+# --build names the artefact; the two profiles live at fixed paths. An explicit
+# BINARY=... still wins, for a directory copied out from under target/.
+case "$BUILD" in
+    release)   BUILD_BINARY="target/release/kerbside" ; REBUILD_CMD="scripts/build.sh release" ;;
+    dist)      BUILD_BINARY="target/dist/kerbside"    ; REBUILD_CMD="scripts/build.sh dist" ;;
+    dev|debug) BUILD_BINARY="target/debug/kerbside"   ; REBUILD_CMD="scripts/build.sh dev" ;;
+    *) echo "unknown --build '$BUILD' (expected: release, dist)" >&2; exit 2 ;;
+esac
+# The dist artefact is built with -Zbuild-std, which nests it under
+# target/<triple>/dist/. scripts/build.sh symlinks target/dist -> there; if that
+# link is absent (built elsewhere, or an older build.sh) resolve the triple dir.
+if [[ "$BUILD" == "dist" && ! -e "$BUILD_BINARY" ]]; then
+    for cand in target/*/dist/kerbside; do
+        [[ -x "$cand" ]] && BUILD_BINARY="$cand" && break
+    done
+fi
+BINARY="${BINARY_ENV:-$BUILD_BINARY}"
 
 fail() {
     if [[ "$FORCE" == "1" ]]; then
@@ -55,7 +78,7 @@ fail() {
 # than a release one and would be a spectacularly wrong number to publish.
 if [[ ! -x "$BINARY" ]]; then
     echo "REFUSING TO BENCHMARK: $BINARY not found." >&2
-    echo "  Build it first:  cargo build --release" >&2
+    echo "  Build it first:  $REBUILD_CMD" >&2
     exit 1
 fi
 
@@ -72,7 +95,7 @@ if ! VERSION_BLOCK="$("$BINARY" --version 2>&1)"; then
         echo "REFUSING TO BENCHMARK: $BINARY does not understand --version." >&2
         echo "  It predates this script, so it is built from older source than" >&2
         echo "  this checkout. Rebuild it:" >&2
-        echo "    cargo build --release" >&2
+        echo "    $REBUILD_CMD" >&2
     else
         echo "REFUSING TO BENCHMARK: $BINARY would not start." >&2
         echo "  Usually a shared library it links against is missing. On Windows" >&2
@@ -81,7 +104,7 @@ if ! VERSION_BLOCK="$("$BINARY" --version 2>&1)"; then
         echo "  opencv_world DLL that is shipped next to the binary, and the" >&2
         echo "  loader then fails before main() runs. Rebuild through the script:" >&2
         echo "    . ./scripts/env-windows.ps1   # or source scripts/env-linux.sh" >&2
-        echo "    cargo build --release" >&2
+        echo "    $REBUILD_CMD" >&2
     fi
     echo >&2
     echo "  What it said:" >&2
@@ -95,7 +118,7 @@ fi
 
 if grep -q "NOT valid for benchmarking" <<<"$VERSION_BLOCK"; then
     fail "$BINARY is a debug build. Timings from it mean nothing.
-    cargo build --release"
+    $REBUILD_CMD"
 fi
 
 echo "== environment =="
@@ -164,7 +187,7 @@ if [[ "$(echo "$LOAD > 1.0" | bc -l 2>/dev/null || echo 0)" == "1" ]]; then
 fi
 
 echo
-echo "== realtime run: $FRAMES frames =="
+echo "== realtime run: $FRAMES frames  (build: $BUILD, binary: $BINARY) =="
 mkdir -p "$OUT"
 
 "$BINARY" \
@@ -197,4 +220,4 @@ else
 fi
 
 echo
-echo "Recorded to $OUT/. Environment: governor=$GOVERNOR temp=${TEMP_C}C forced=$FORCE"
+echo "Recorded to $OUT/. Environment: build=$BUILD governor=$GOVERNOR temp=${TEMP_C}C forced=$FORCE"
