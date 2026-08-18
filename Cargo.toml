@@ -59,6 +59,7 @@ arc-swap = "1.7"
 # frames so a port's scene generator can be checked frame by frame. Pure Rust,
 # no native dependency -- it has to build unchanged on aarch64.
 sha2 = "0.10"
+obfstr = "0.4"
 
 [profile.release]
 opt-level = 3

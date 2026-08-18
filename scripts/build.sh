@@ -126,7 +126,13 @@ if [[ "$PROFILE" == "dist" ]]; then
         exit 1
     fi
     CARGO_ARGS+=("+${OBF_TOOLCHAIN}")
-    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none"
+    # The obfuscation plugin goes in RUSTFLAGS, NOT `cargo rustc -- ...`: the
+    # `cargo rustc` + `-Zbuild-std` combination self-deadlocks on the target lock
+    # (cargo opens target/<triple>/dist/.cargo-lock twice, exclusively). With the
+    # plugin in RUSTFLAGS a plain `cargo build` is used instead, and policy.json's
+    # func filter (".*kerbside.*") scopes obfuscation to this crate, so std and the
+    # dependencies are compiled with the plugin loaded but left untransformed.
+    export RUSTFLAGS="$RUSTFLAGS -Zlocation-detail=none -Zllvm-plugins=${OBF_PLUGIN}"
     BUILD_STD_ARGS+=(
         "--target" "$HOST_TRIPLE"
         "-Zbuild-std=std,panic_abort"
@@ -138,8 +144,6 @@ if [[ "$PROFILE" == "dist" ]]; then
         # reach the shipped binary. dev/release keep it (and --dump-settings).
         "--no-default-features"
     )
-    # Applied to the kerbside crate only (after `--`), never to std/deps.
-    RUSTC_PLUGIN_ARGS+=("-Z" "llvm-plugins=${OBF_PLUGIN}")
     echo "toolchain: ${OBF_TOOLCHAIN}  (LLVM matched to plugin)"
     echo "  -Zlocation-detail=none                    (drop panic-site source paths)"
     echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
@@ -151,10 +155,10 @@ fi
 echo
 echo "== building profile '$PROFILE' -> target/$OUT_DIR =="
 if [[ "$PROFILE" == "dist" ]]; then
-    # cargo rustc passes the trailing args to the FINAL crate (kerbside) only,
-    # so the obfuscation plugin never touches std or the dependencies.
-    if ! cargo "${CARGO_ARGS[@]}" rustc --profile dist "${BUILD_STD_ARGS[@]}" \
-            --bin kerbside -- "${RUSTC_PLUGIN_ARGS[@]}"; then
+    # `cargo build` (not `cargo rustc`): the plugin is already in RUSTFLAGS, and
+    # `cargo rustc` + `-Zbuild-std` self-deadlocks on the target lock. Obfuscation
+    # is scoped to this crate by policy.json, not by which crate cargo passes args to.
+    if ! cargo "${CARGO_ARGS[@]}" build --profile dist "${BUILD_STD_ARGS[@]}" --bin kerbside; then
         echo; echo "BUILD FAILED" >&2; exit 1
     fi
 else

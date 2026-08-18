@@ -76,14 +76,22 @@ python3 tools/check_binary.py target/dist/kerbside --strict
 ```
 
 Profiles: `dev` → `target/debug`, `release` → benchmarking, `dist` → shipped.
-`dist` is the hardened, **obfuscated** artefact and carries four layers at once:
+`dist` is the hardened, **obfuscated** artefact and carries six layers at once:
 `strip`; `--no-default-features` (drops the settings-schema field-name strings);
 `-Zbuild-std` + `panic_immediate_abort` (drops the residual `/rustc/…` std paths
-and the panic-machinery strings); and an **OLLVM pass plugin** via `-Zllvm-plugins`
-that flattens/obscures the control flow of the kerbside crate only. See BUILD.md →
-"The dist profile", and respect the **LLVM-version coupling** invariant below when
-bumping the toolchain. `release`/`dev` use the default toolchain and none of this.
-`bench.sh` honours `BINARY=target/dist/kerbside` — benchmark whatever you ship.
+and the panic-machinery strings); an **OLLVM pass plugin** (Pluto) that flattens
+the control flow of the kerbside crate; **numeric-constant encryption**
+(`crate::crypt` — the tuning values and the calibration survey are XORed at rest
+and decoded at run time, so a float scan of `.rodata` no longer finds them); and
+**string encryption** (`obfstr`, the diagnostic message text). The plugin is
+passed via `RUSTFLAGS` with `cargo build` and scoped to this crate by `policy.json`
+(`func: ".*kerbside.*"`) — *not* `cargo rustc`, which self-deadlocks with
+`-Zbuild-std`. See BUILD.md → "The dist profile", and respect the **LLVM-version
+coupling** invariant below when bumping the toolchain. `release`/`dev` use the
+default toolchain: they get the constant and string encryption (both source-level,
+so they are in every build) but not strip, the schema drop, build-std or the
+control-flow obfuscation. `bench.sh` honours `BINARY=target/dist/kerbside` —
+benchmark whatever you ship.
 
 ## Architecture
 
@@ -145,31 +153,43 @@ versions must match the Python's (`opencv-python-headless==4.13.0.92`,
 substitute pure-Rust reimplementations — three quarters of the frame is inside
 them and that share is meant to cost the same from both languages.
 
-**The obfuscated `dist` pins its toolchain to the plugin's LLVM.** `-Zllvm-plugins`
-loads the OLLVM (Pluto) pass plugin into the LLVM that rustc itself carries, so the
-plugin must be built against that exact LLVM major. `scripts/build.sh` therefore
-pins `OBF_TOOLCHAIN` (currently `nightly-2025-06-15`, LLVM 20 — also the oldest
-nightly that still satisfies the deps' MSRV of rustc ≥ 1.88) to the committed
-`OBF_PLUGIN` (`hardening/Pluto-llvm20.so`), and **refuses** to build `dist` if the
-toolchain, its `rust-src`, the plugin, or `policy.json` is missing — it does not
-silently fall back to a non-obfuscated binary. Bumping the nightly means rebuilding
-the plugin against the new LLVM (needs that LLVM's `-dev` headers, from apt.llvm.org
-since Debian lags) and updating both variables together; a plugin built against a
-different LLVM will not load. Do not "simplify" this back to the default nightly.
-The selective `policy.json` (flatten the crown functions, `bcf`+`sub` elsewhere,
-`gle` on the module) lives in the package root because Pluto reads it from the CWD.
+**The obfuscated `dist` pins its toolchain to the plugin's LLVM.** The OLLVM
+(Pluto) pass plugin loads into the LLVM that rustc itself carries, so it must be
+built against that exact LLVM major. `scripts/build.sh` pins `OBF_TOOLCHAIN`
+(currently `nightly-2025-06-15`, LLVM 20 — also the oldest nightly that still
+satisfies the deps' MSRV of rustc ≥ 1.88) to the committed `OBF_PLUGIN`
+(`vendor/Pluto-llvm20.so`), and **refuses** to build `dist` if the toolchain, its
+`rust-src`, the plugin, or `policy.json` is missing — it does not silently fall
+back. Bumping the nightly means rebuilding the plugin against the new LLVM (needs
+that LLVM's `-dev` headers, from apt.llvm.org since Debian lags) and updating both
+variables together; a plugin built against a different LLVM will not load.
+
+The plugin is passed via **`RUSTFLAGS` with `cargo build`**, *not* `cargo rustc
+-- -Zllvm-plugins`: `cargo rustc` + `-Zbuild-std` self-deadlocks on the target
+lock (it opens `target/<triple>/dist/.cargo-lock` twice, exclusively). Because
+RUSTFLAGS reaches every crate, the selective `policy.json` — in the package root,
+where Pluto reads it from the CWD — scopes obfuscation to this crate with
+`func: ".*kerbside.*"` (flatten the crown functions, `bcf`+`sub` on the rest of
+kerbside). std and the dependencies compile with the plugin loaded but unmatched,
+so they are left untransformed; the "conf not found" lines in the build log are
+that no-op, not an error. Do not "simplify" this back to `cargo rustc` or the
+default nightly.
 
 ### Deliberate non-goals
 
 `--gc-stats` reports that there is no tracing collector, rather than being
 removed — "the pauses are gone" is the headline result. `tuning.rs` values and
-`config/calibration.rs`'s survey numbers **remain readable even in the obfuscated
-`dist`**: OLLVM flattens the control flow (the algorithm, A1) but leaves `f64`
-constants as plaintext immediates in `.rodata`, so the survey table and the tuning
-values are still recoverable. The port changes the *names* and obscures the
-*logic*, not the *values*; hiding those is a separate data-encryption layer, and
-the report records that distinction. `model/vehicle.onnx` is copied next to the
-binary by `build.rs`, not embedded.
+`config/calibration.rs`'s survey numbers are **encrypted at rest** (`crate::crypt`,
+`encf!`/`enci!`): stored XORed and decoded at run time behind a `black_box`
+barrier, so a float scan of `.rodata` no longer finds them and the contiguous
+survey table is gone. Diagnostic message text is likewise encrypted with `obfstr`.
+Both defeat a *static* read of the binary, **not a RAM dump** — the decoded values
+and strings sit in memory while the process runs. Neither is total: a value that
+recurs as an unrelated literal elsewhere still leaks, and strings in `const`/`static`
+arrays (`perf::STAGES`, the CSV columns, `USAGE`) or inside `format!`/`println!`/
+`panic!` literals cannot be wrapped. OLLVM, on top, obscures the *logic* (A1); the
+port changes the *names*. `model/vehicle.onnx` is copied next to the binary by
+`build.rs`, not embedded.
 
 ## Conventions
 

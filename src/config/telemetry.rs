@@ -7,7 +7,7 @@ crate::settings_group! {
         // Tier 2: full per-frame stage timings, written as CSV by a separate
         // thread. The hot path only appends to a queue.
         MEASURE_STAGES: bool = false,
-        PERF_DIR: String = "telemetry".to_string(),
+        PERF_DIR: String = obfstr::obfstr!("telemetry").to_string(),
         PERF_FLUSH_MS: i64 = 250,
 
         // The nested per-frame evidence record. A speed camera has to be able to

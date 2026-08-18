@@ -56,19 +56,19 @@ impl BlobFinder {
                 opencv::imgproc::CHAIN_APPROX_SIMPLE,
                 CvPoint::new(0, 0),
             )
-            .map_err(|e| format!("cannot extract contours: {e}"))?;
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot extract contours: ")))?;
             pf.end("bl_find");
 
             pf.start("bl_filter");
             let mut found: Vec<Blob> = Vec::new();
             for contour in contours.iter() {
                 let area = opencv::imgproc::contour_area_def(&contour)
-                    .map_err(|e| format!("cannot measure a contour: {e}"))?;
+                    .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot measure a contour: ")))?;
                 if area < bg.MIN_AREA as f64 || area > bg.MAX_AREA as f64 {
                     continue;
                 }
                 let rect = opencv::imgproc::bounding_rect(&contour)
-                    .map_err(|e| format!("cannot bound a contour: {e}"))?;
+                    .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot bound a contour: ")))?;
                 if rect.height <= 0 || rect.width <= 0 {
                     continue;
                 }

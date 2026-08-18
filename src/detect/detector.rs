@@ -80,15 +80,15 @@ pub fn preprocess(working: &Mat, height: i32, width: i32) -> Result<Array4<f32>,
         0.0,
         opencv::imgproc::INTER_AREA,
     )
-    .map_err(|e| format!("cannot resize for the model: {e}"))?;
+    .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot resize for the model: ")))?;
 
     let mut rgb = Mat::default();
     opencv::imgproc::cvt_color_def(&resized, &mut rgb, opencv::imgproc::COLOR_BGR2RGB)
-        .map_err(|e| format!("cannot convert to RGB: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot convert to RGB: ")))?;
 
     let bytes = rgb
         .data_bytes()
-        .map_err(|e| format!("the model input is not contiguous: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("the model input is not contiguous: ")))?;
     let (h, w) = (height as usize, width as usize);
     let mut tensor = Array4::<f32>::zeros((1, 3, h, w));
     for y in 0..h {
@@ -222,7 +222,7 @@ fn try_init_runtime() -> Result<(), String> {
         })
         .is_ok()
     {
-        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY} (system library path)"));
+        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY}{}", obfstr::obfstr!(" (system library path)")));
         return Ok(());
     }
 
@@ -270,17 +270,17 @@ impl Detector {
         // would preempt the pipeline thread running the background model, which
         // is the very work this call is supposed to be hiding behind.
         let session = Session::builder()
-            .map_err(|e| format!("cannot configure ONNX Runtime: {e}"))?
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot configure ONNX Runtime: ")))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("cannot set the optimisation level: {e}"))?
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set the optimisation level: ")))?
             .with_intra_threads(mdl.ORT_INTRA_THREADS as usize)
-            .map_err(|e| format!("cannot set intra-op threads: {e}"))?
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set intra-op threads: ")))?
             .with_inter_threads(mdl.ORT_INTER_THREADS as usize)
-            .map_err(|e| format!("cannot set inter-op threads: {e}"))?
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set inter-op threads: ")))?
             .with_parallel_execution(false)
-            .map_err(|e| format!("cannot select sequential execution: {e}"))?
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot select sequential execution: ")))?
             .commit_from_file(&path)
-            .map_err(|e| format!("cannot load {}: {e}", path.display()))?;
+            .map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot load "), path.display()))?;
 
         let (tx, rx) = mpsc::channel::<Job>();
         let height = mdl.INPUT_HEIGHT;
@@ -290,7 +290,7 @@ impl Detector {
         // Python, where any thread could in principle call `session.run`, and it
         // is free: only one thread ever needed it.
         let worker = std::thread::Builder::new()
-            .name("detector".into())
+            .name(obfstr::obfstr!("detector").into())
             .spawn(move || {
                 let mut session = session;
                 while let Ok((frame, reply)) = rx.recv() {
@@ -300,7 +300,7 @@ impl Detector {
                     let _ = reply.send(outcome);
                 }
             })
-            .map_err(|e| format!("cannot start the detector thread: {e}"))?;
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the detector thread: ")))?;
 
         // The input geometry is captured by the worker closure above, not kept
         // here: only the worker ever needs it, and a second copy on this struct
@@ -335,9 +335,9 @@ impl Detector {
         let (tx, rx) = mpsc::channel();
         self.jobs
             .as_ref()
-            .ok_or_else(|| "the detector has been shut down".to_string())?
+            .ok_or_else(|| obfstr::obfstr!("the detector has been shut down").to_string())?
             .send((working, tx))
-            .map_err(|_| "the detector thread has stopped".to_string())?;
+            .map_err(|_| obfstr::obfstr!("the detector thread has stopped").to_string())?;
         Ok(rx)
     }
 
@@ -364,23 +364,23 @@ fn run_once(
 ) -> Result<Inference, String> {
     let tensor = preprocess(working, height, width)?;
     let began = Instant::now();
-    let input = Tensor::from_array(tensor).map_err(|e| format!("cannot build the input: {e}"))?;
+    let input = Tensor::from_array(tensor).map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot build the input: ")))?;
     let outputs = session
         .run(ort::inputs!["input" => input])
-        .map_err(|e| format!("inference failed: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("inference failed: ")))?;
     let infer_ms = began.elapsed().as_secs_f64() * 1000.0;
 
     let view = outputs["likelihood"]
         .try_extract_array::<f32>()
-        .map_err(|e| format!("cannot read the likelihood map: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot read the likelihood map: ")))?;
     let shape = view.shape().to_vec();
     if shape.len() != 4 {
-        return Err(format!("expected a 4-D likelihood map, got shape {shape:?}"));
+        return Err(format!("{}{shape:?}", obfstr::obfstr!("expected a 4-D likelihood map, got shape ")));
     }
     // `likelihood[0, 0]` -- one image, one channel.
     let grid = view
         .into_dimensionality::<ndarray::Ix4>()
-        .map_err(|e| format!("unexpected likelihood shape: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("unexpected likelihood shape: ")))?;
     let map = grid.slice(ndarray::s![0, 0, .., ..]).to_owned();
     Ok(Inference {
         likelihood: map,

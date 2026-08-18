@@ -246,7 +246,7 @@ impl Pipeline {
         if let Some(pending) = pending {
             let inference = pending
                 .recv()
-                .map_err(|_| "the detector thread stopped before answering".to_string())??;
+                .map_err(|_| obfstr::obfstr!("the detector thread stopped before answering").to_string())??;
             self.likelihood = Some(inference.likelihood);
             pf.set("infer", inference.infer_ms);
             perf::counters().inferences.fetch_add(1, Ordering::Relaxed);
@@ -355,7 +355,7 @@ impl RunningPipeline {
         let mailbox = pipeline.mailbox();
         let progress = pipeline.progress();
         let handle = std::thread::Builder::new()
-            .name("pipeline".into())
+            .name(obfstr::obfstr!("pipeline").into())
             .spawn(move || -> Result<Pipeline, String> {
                 let mut pipeline = pipeline;
                 let mailbox = pipeline.mailbox();
@@ -377,7 +377,7 @@ impl RunningPipeline {
                     }
                 }
             })
-            .map_err(|e| format!("cannot start the pipeline thread: {e}"))?;
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the pipeline thread: ")))?;
         Ok(Self {
             mailbox,
             progress,
@@ -399,8 +399,8 @@ impl RunningPipeline {
         match self.handle.take() {
             Some(handle) => handle
                 .join()
-                .map_err(|_| "the pipeline thread panicked".to_string())?,
-            None => Err("the pipeline thread was already joined".into()),
+                .map_err(|_| obfstr::obfstr!("the pipeline thread panicked").to_string())?,
+            None => Err(obfstr::obfstr!("the pipeline thread was already joined").into()),
         }
     }
 }

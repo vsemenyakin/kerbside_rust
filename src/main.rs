@@ -71,19 +71,19 @@ struct Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
-        out: "telemetry/results.csv".to_string(),
+        out: obfstr::obfstr!("telemetry/results.csv").to_string(),
         ..Default::default()
     };
     let mut argv = std::env::args().skip(1);
     while let Some(arg) = argv.next() {
-        let mut value = || argv.next().ok_or_else(|| format!("{arg} expects a value"));
+        let mut value = || argv.next().ok_or_else(|| format!("{arg}{}", obfstr::obfstr!(" expects a value")));
         match arg.as_str() {
             "--replay" => args.replay = true,
             "--realtime" => args.realtime = true,
             "--profile" => args.profile = Some(value()?),
-            "--frames" => args.frames = Some(value()?.parse().map_err(|e| format!("--frames: {e}"))?),
-            "--seed" => args.seed = Some(value()?.parse().map_err(|e| format!("--seed: {e}"))?),
-            "--limit" => args.limit = Some(value()?.parse().map_err(|e| format!("--limit: {e}"))?),
+            "--frames" => args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--frames: ")))?),
+            "--seed" => args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--seed: ")))?),
+            "--limit" => args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--limit: ")))?),
             "--out" => args.out = value()?,
             "--overlay" => args.overlay = Some(value()?),
             "--perf" => args.perf = true,
@@ -96,7 +96,7 @@ fn parse_args() -> Result<Args, String> {
                 println!("{USAGE}");
                 std::process::exit(0);
             }
-            other => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
+            other => return Err(format!("{}{other}\n\n{USAGE}", obfstr::obfstr!("unknown argument: "))),
         }
     }
     if args.replay && args.realtime {
@@ -112,7 +112,7 @@ fn parse_args() -> Result<Args, String> {
 /// machines incomparable, which defeats the purpose of this program.
 fn pin_runtime(settings: &Settings) -> Result<(), String> {
     opencv::core::set_num_threads(settings.telemetry.OPENCV_THREADS)
-        .map_err(|e| format!("cannot pin the OpenCV thread pool: {e}"))
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot pin the OpenCV thread pool: ")))
 }
 
 /// Timestamps come from the frame index, not the clock.
@@ -145,7 +145,7 @@ fn print_version() {
     match kerbside::detect::probe_runtime() {
         Ok(()) => println!(
             "onnxruntime  {}",
-            kerbside::detect::resolved_runtime_path().unwrap_or("loaded, path unknown")
+            kerbside::detect::resolved_runtime_path().unwrap_or(obfstr::obfstr!("loaded, path unknown"))
         ),
         Err(e) => println!("onnxruntime  NOT LOADED
 {e}"),

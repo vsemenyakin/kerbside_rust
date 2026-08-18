@@ -346,7 +346,7 @@ Two things to know:
 scripts/build.sh
 ```
 
-Same `opt-level` and LTO as `release`, plus **four hardening layers applied
+Same `opt-level` and LTO as `release`, plus **six hardening layers applied
 together** — this is the shipped, obfuscated artefact:
 
 1. **`strip`** — the symbol table (an ELF carries it in the file; there is no
@@ -360,12 +360,24 @@ together** — this is the shipped, obfuscated artefact:
    paths. This *removes* the residual `/rustc/<commit>/library/...` paths that
    `--remap-path-prefix` can only anonymise, and the panic-message formatting
    strings with them.
-4. **`-Zllvm-plugins=<Pluto>`** — an OLLVM New-PM pass plugin (bogus control
-   flow + control-flow flattening + instruction substitution + global
-   encryption) applied, via `cargo rustc -- …`, to the **kerbside crate only**;
-   `std` and the dependencies are not obfuscated. This obscures the algorithm
-   and stage order (target A1) so recovering intent is expensive even from a
-   memory dump — the part a language port is actually meant to move.
+4. **OLLVM obfuscation** — the Pluto New-PM pass plugin (bogus control flow +
+   control-flow flattening + instruction substitution) obscures the algorithm
+   and stage order (target A1), so recovering intent is expensive even from a
+   memory dump. Passed via `RUSTFLAGS` and scoped to the **kerbside crate** by
+   `policy.json` (`func: ".*kerbside.*"`); `std` and the dependencies are not
+   obfuscated. See the coupling note below for why it is `cargo build`, not
+   `cargo rustc`.
+5. **Numeric-constant encryption** (`crate::crypt`, source-level — in every
+   build) — the `tuning.rs` values and the `calibration.rs` survey are stored
+   XORed on their bit pattern and decoded at run time behind a `black_box`
+   barrier, so a float scan of `.rodata` no longer finds them and the contiguous
+   survey table is gone (targets A2/A4). Bit-exact, so the CSV oracle still holds.
+6. **String encryption** (`obfstr`, source-level) — the diagnostic message text
+   (`"cannot draw the verge"`, `"homography element"`, …) is XOR-encrypted at
+   compile time and decoded on the stack at use.
+
+Layers 5 and 6 defeat a *static* read of the medium, not a **RAM dump** — the
+decoded values and strings are in memory while the process runs.
 
 Measured on this project (obfuscated `dist`):
 
@@ -373,8 +385,10 @@ Measured on this project (obfuscated `dist`):
 | --- | --- |
 | residual build-machine / std source paths | **0** (was 53 before `-Zbuild-std`) |
 | settings field-name strings | gone |
-| conditional branches in `.text` | **17 748** vs 8 336 un-obfuscated (+113%) |
-| size | ~922 KB (obfuscation roughly doubles a stripped un-obfuscated dist) |
+| conditional branches in `.text` | **31 131** vs 8 336 un-obfuscated |
+| contiguous survey table in `.rodata` | **gone**; float scan drops 10/16 → 4/16 (residuals are unrelated literals) |
+| diagnostic strings | encrypted with `obfstr` — absent from the binary |
+| size | ~1.64 MB (obfuscation + the inlined constant/string decoders) |
 | result-CSV reproduction | **byte-identical `sha256`** to the clean build — passes the oracle |
 | frame-time cost of obfuscation | **≈ +0.08 %** (the obfuscatable code is ~0.3 % of the frame; 99 % is native OpenCV/ONNX) |
 
@@ -395,6 +409,15 @@ build. `scripts/build.sh` pins both (overridable via `OBF_TOOLCHAIN` /
 back** — if the toolchain, its `rust-src`, the plugin, or `policy.json` is missing.
 Current pin: `nightly-2025-06-15` (rustc 1.89, **LLVM 20** — also the oldest
 nightly that still satisfies the deps' MSRV of rustc ≥ 1.88).
+
+The plugin is applied through **`RUSTFLAGS` with `cargo build`**, not `cargo rustc
+-- -Zllvm-plugins`: the latter self-deadlocks with `-Zbuild-std` — it opens
+`target/<triple>/dist/.cargo-lock` twice, exclusively, and blocks on itself.
+Because RUSTFLAGS reaches every crate, `policy.json` does the scoping: its
+`func: ".*kerbside.*"` filter matches only this crate's mangled symbols, so `std`
+and the dependencies compile with the plugin loaded but leave it a no-op (the
+`conf not found: …/policy.json` lines in the build log are that no-op — Pluto
+looks for the policy in each crate's working directory and finds none).
 
 For a from-nothing install, see **"Fresh-machine setup"** above; it does not build
 the plugin. You only rebuild it when you **bump the toolchain to a different LLVM**,
@@ -442,19 +465,25 @@ Checked on the current build:
 | Build-machine paths and std `/rustc/…` paths | gone (`--remap-path-prefix` + `-Zbuild-std`) |
 | Symbols | gone (`strip`) |
 | Settings schema — field *names* (`IMAGE_POINTS`, `GATE_COAST_MARGIN_KPH`) | gone (`--no-default-features` + strip) |
-| Algorithm / stage order (control flow) | **obscured** — OLLVM flattening, +113% branches |
-| Tuning constant *values* (`1.85`) | present, as immediates -- see `tuning.rs` |
-| The survey (`calibration.rs`) | present, as `f64` literals in `.rodata` |
+| Algorithm / stage order (control flow) | **obscured** — OLLVM flattening |
+| Tuning values / calibration survey | **encrypted at rest** (`crate::crypt`) — contiguous survey table gone; only values that recur as unrelated literals elsewhere remain |
+| Diagnostic message strings | **encrypted** (`obfstr`) |
+| Stage names (`perf::STAGES`), CSV columns, `USAGE` help | present — `const`/`static` string arrays, which `obfstr` cannot wrap |
+| `panic!` / `println!` text | `panic!` gone (`panic_immediate_abort`); `println!` / usage text present |
 | `vehicle.onnx` | a plain file next to the binary; the port does not address this |
-| Panic and usage message text | present, and deliberately: a device that cannot explain a failure is worse |
 
 The obfuscation moves the **control flow** (the algorithm and stage order): it is
 flattened and padded with bogus paths, so recovering *intent* is expensive even
-from a memory dump. It does **not** touch the **data** — the tuning values, the
-survey and `vehicle.onnx` remain readable `f64`s / a plain file, because a code
-obfuscator flattens logic, not constants. Those three are on the assessment's
-list and are a separate data-encryption problem; say so in the report rather than
-letting a clean `strings` output imply otherwise.
+from a memory dump. On top of the language port, `crate::crypt` encrypts the
+numeric **data** (the tuning values and the survey) and `obfstr` encrypts the
+diagnostic **strings** — both source-level and bit-exact. They shrink what a
+static `strings`/float scan of the medium returns, but not to zero and not against
+a **RAM dump**: the decoded values and text sit in memory at run time. Two
+categories resist encryption entirely and still ship — `const`/`static` string
+arrays (`perf::STAGES`, the CSV columns, `USAGE`) and `format!`/`println!` format
+literals, because neither can be moved into an `obfstr!`/`encf!` call — and
+`vehicle.onnx` is still a plain file. Say so in the report rather than letting a
+shrunken `strings` output imply the data is gone.
 
 ## Cross-checking the two arms
 

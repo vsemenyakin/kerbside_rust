@@ -64,20 +64,20 @@ impl BackgroundModel {
             bg.VAR_THRESHOLD,
             bg.DETECT_SHADOWS,
         )
-        .map_err(|e| format!("cannot create the background subtractor: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot create the background subtractor: ")))?;
 
         let open_kernel = opencv::imgproc::get_structuring_element(
             opencv::imgproc::MORPH_ELLIPSE,
             Size::new(bg.OPEN_KERNEL, bg.OPEN_KERNEL),
             CvPoint::new(-1, -1),
         )
-        .map_err(|e| format!("cannot build the opening kernel: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot build the opening kernel: ")))?;
         let close_kernel = opencv::imgproc::get_structuring_element(
             opencv::imgproc::MORPH_ELLIPSE,
             Size::new(bg.CLOSE_KERNEL, bg.CLOSE_KERNEL),
             CvPoint::new(-1, -1),
         )
-        .map_err(|e| format!("cannot build the closing kernel: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot build the closing kernel: ")))?;
 
         Ok(Self {
             subtractor,
@@ -118,7 +118,7 @@ impl BackgroundModel {
             &mut mask,
             self.learning_rate,
         )
-        .map_err(|e| format!("the background model failed: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("the background model failed: ")))?;
         pf.end("bg");
 
         pf.start("morph");
@@ -133,7 +133,7 @@ impl BackgroundModel {
                 255.0,
                 opencv::imgproc::THRESH_BINARY,
             )
-            .map_err(|e| format!("cannot threshold the shadow value: {e}"))?;
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot threshold the shadow value: ")))?;
             mask = thresholded;
         }
         // Open then close, in that order. Opening first removes speckle so the
@@ -150,7 +150,7 @@ impl BackgroundModel {
             opencv::imgproc::MORPH_OPEN,
             &self.open_kernel,
         )
-        .map_err(|e| format!("cannot open the foreground mask: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot open the foreground mask: ")))?;
         let mut closed = Mat::default();
         opencv::imgproc::morphology_ex_def(
             &opened,
@@ -158,12 +158,12 @@ impl BackgroundModel {
             opencv::imgproc::MORPH_CLOSE,
             &self.close_kernel,
         )
-        .map_err(|e| format!("cannot close the foreground mask: {e}"))?;
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot close the foreground mask: ")))?;
         mask = closed;
         pf.end("morph");
 
         let set = opencv::core::count_non_zero(&mask)
-            .map_err(|e| format!("cannot measure the foreground: {e}"))?;
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot measure the foreground: ")))?;
         Ok((mask, set as f64 / self.pixels))
     }
 
@@ -194,12 +194,12 @@ pub fn to_working(full: &Mat, width: i32, height: i32) -> Result<Mat, String> {
         0.0,
         opencv::imgproc::INTER_AREA,
     )
-    .map_err(|e| format!("cannot build the working frame: {e}"))?;
+    .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot build the working frame: ")))?;
     Ok(working)
 }
 
 /// An empty single-channel mask, for the frames that are refused outright.
 pub fn empty_mask(height: i32, width: i32) -> Result<Mat, String> {
     Mat::new_rows_cols_with_default(height, width, opencv::core::CV_8UC1, Scalar::all(0.0))
-        .map_err(|e| format!("cannot allocate an empty mask: {e}"))
+        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot allocate an empty mask: ")))
 }

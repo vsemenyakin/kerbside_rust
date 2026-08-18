@@ -52,8 +52,8 @@ fn parse_args() -> Result<Args, String> {
                 .ok_or_else(|| format!("{arg} expects a value"))
         };
         match arg.as_str() {
-            "--frames" => args.frames = value()?.parse().map_err(|e| format!("--frames: {e}"))?,
-            "--seed" => args.seed = Some(value()?.parse().map_err(|e| format!("--seed: {e}"))?),
+            "--frames" => args.frames = value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--frames: ")))?,
+            "--seed" => args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--seed: ")))?),
             "--mp4" => args.mp4 = Some(value()?),
             "--png-dir" => args.png_dir = Some(value()?),
             "--raw" => args.raw = Some(value()?),
@@ -85,7 +85,7 @@ fn run() -> Result<(), String> {
     let mut writer = match &args.mp4 {
         Some(path) => {
             let fourcc = opencv::videoio::VideoWriter::fourcc('m', 'p', '4', 'v')
-                .map_err(|e| format!("fourcc: {e}"))?;
+                .map_err(|e| format!("{}{e}", obfstr::obfstr!("fourcc: ")))?;
             let writer = opencv::videoio::VideoWriter::new(
                 path,
                 fourcc,
@@ -95,7 +95,7 @@ fn run() -> Result<(), String> {
             )
             .map_err(|e| format!("cannot open video writer for {path:?}: {e}"))?;
             if !writer.is_opened()
-                .map_err(|e| format!("video writer: {e}"))?
+                .map_err(|e| format!("{}{e}", obfstr::obfstr!("video writer: ")))?
             {
                 return Err(format!("cannot open video writer for {path:?}"));
             }
@@ -147,7 +147,7 @@ fn run() -> Result<(), String> {
         }
     }
     if let Some(raw) = raw.as_mut() {
-        raw.flush().map_err(|e| format!("cannot flush the raw clip: {e}"))?;
+        raw.flush().map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot flush the raw clip: ")))?;
     }
 
     seen.sort_by_key(|(id, _)| *id);

@@ -9,7 +9,7 @@
 crate::settings_group! {
     pub struct ModelSettings {
         ENABLED: bool = true,
-        FILE: String = "vehicle.onnx".to_string(),
+        FILE: String = obfstr::obfstr!("vehicle.onnx").to_string(),
 
         // Input is [1, 3, INPUT_HEIGHT, INPUT_WIDTH], a direct resize of the
         // working frame. Deliberately not square: the frame is 16:9, and

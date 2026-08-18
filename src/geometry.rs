@@ -157,7 +157,7 @@ impl Homography {
         zone: (f64, f64),
     ) -> Result<Self, String> {
         if image_points.len() != 4 || world_points.len() != 4 {
-            return Err("a homography needs exactly four survey marks".into());
+            return Err(obfstr::obfstr!("a homography needs exactly four survey marks").into());
         }
 
         // Through OpenCV rather than a hand-rolled 8x8 solve, and through
@@ -174,14 +174,14 @@ impl Homography {
             target.push(Point2f::new(x as f32, y as f32));
         }
         let mat = opencv::imgproc::get_perspective_transform_def(&source, &target)
-            .map_err(|e| format!("getPerspectiveTransform failed: {e}"))?;
+            .map_err(|e| format!("{}{e}", obfstr::obfstr!("getPerspectiveTransform failed: ")))?;
 
         let mut to_world = [[0.0f64; 3]; 3];
         for (r, row) in to_world.iter_mut().enumerate() {
             for (c, cell) in row.iter_mut().enumerate() {
                 *cell = *mat
                     .at_2d::<f64>(r as i32, c as i32)
-                    .map_err(|e| format!("homography element ({r},{c}): {e}"))?;
+                    .map_err(|e| format!("{}({r},{c}): {e}", obfstr::obfstr!("homography element ")))?;
             }
         }
         let to_image = invert_3x3(&to_world)?;
@@ -313,7 +313,7 @@ fn invert_3x3(m: &[[f64; 3]; 3]) -> Result<[[f64; 3]; 3], String> {
             }
         }
         if lu[p][k] == 0.0 {
-            return Err("the survey marks are collinear: the homography is singular".into());
+            return Err(obfstr::obfstr!("the survey marks are collinear: the homography is singular").into());
         }
         if p != k {
             lu.swap(k, p);
@@ -375,7 +375,7 @@ mod tests {
             1.0,
             (6.0, 34.0),
         )
-        .expect("the declared survey must fit")
+        .expect(obfstr::obfstr!("the declared survey must fit"))
     }
 
     #[test]

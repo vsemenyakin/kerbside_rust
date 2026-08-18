@@ -611,7 +611,7 @@ pub fn resolve_settings(
 /// guarantee spelled out.
 static CURRENT: LazyLock<ArcSwap<Settings>> = LazyLock::new(|| {
     ArcSwap::from_pointee(
-        resolve(None, Vec::new(), false).expect("the declared defaults must resolve"),
+        resolve(None, Vec::new(), false).expect(obfstr::obfstr!("the declared defaults must resolve")),
     )
 });
 
