@@ -38,7 +38,7 @@ pub fn score_blobs(
     likelihood: Option<&Array2<f32>>,
     blobs: &[Blob],
     working_shape: (i32, i32),
-    settings: &Settings,
+    _settings: &Settings,
     pf: &mut perf::Frame,
 ) -> Vec<f64> {
     let likelihood = match likelihood {
@@ -46,7 +46,6 @@ pub fn score_blobs(
         _ => return vec![1.0; blobs.len()],
     };
 
-    let mdl = &settings.model;
     let (work_h, work_w) = working_shape;
     let (grid_h, grid_w) = (likelihood.shape()[0], likelihood.shape()[1]);
 
@@ -57,6 +56,7 @@ pub fn score_blobs(
     pf.start(crate::perf::stage::SCORE);
     pf.start(crate::perf::stage::SC_SAMPLE);
     let mut scores = Vec::with_capacity(blobs.len());
+    let threshold = crate::tuning::vehicle_threshold() as f32;
     for blob in blobs {
         let b = &blob.box_;
         let x0 = f64::max(0.0, (b.x * sx).floor()) as usize;
@@ -70,7 +70,6 @@ pub fn score_blobs(
             scores.push(1.0);
             continue;
         }
-        let threshold = mdl.VEHICLE_THRESHOLD as f32;
         let mut over = 0usize;
         for y in y0..y1 {
             for x in x0..x1 {
@@ -88,7 +87,7 @@ pub fn score_blobs(
 }
 
 /// Which blobs survive as vehicles.
-pub fn accept(scores: &[f64], settings: &Settings) -> Vec<bool> {
-    let floor = settings.model.MIN_COVERAGE;
+pub fn accept(scores: &[f64], _settings: &Settings) -> Vec<bool> {
+    let floor = crate::tuning::min_coverage();
     scores.iter().map(|score| *score >= floor).collect()
 }

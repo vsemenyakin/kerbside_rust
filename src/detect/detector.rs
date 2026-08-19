@@ -328,7 +328,7 @@ impl Detector {
         if !settings.model.ENABLED {
             return false;
         }
-        frame_id % i64::max(1, settings.model.EVERY_N_FRAMES) == 0
+        frame_id % i64::max(1, crate::tuning::infer_every_n_frames()) == 0
     }
 
     /// Queue one inference. Returns immediately.

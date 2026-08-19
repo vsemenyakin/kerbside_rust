@@ -156,7 +156,7 @@ impl SpeedMeasurer {
     /// rather than the full fit, deliberately: the full fit is dragged toward a
     /// swap that has already happened, so it would forgive the very event this
     /// is looking for.
-    fn is_a_jump(vehicle: &Vehicle, t: f64, along: f64, settings: &Settings) -> bool {
+    fn is_a_jump(vehicle: &Vehicle, t: f64, along: f64, _settings: &Settings) -> bool {
         let n = vehicle.observations.len();
         if n < 3 {
             return false;
@@ -169,7 +169,7 @@ impl SpeedMeasurer {
         }
         let rate = (last.along_m - previous.along_m) / dt;
         let predicted = last.along_m + rate * (t - last.t);
-        (along - predicted).abs() > settings.tracking.MAX_JUMP_M
+        (along - predicted).abs() > crate::tuning::track_max_jump_m()
     }
 
     /// Vehicle length in metres, from its box through the ground plane.

@@ -40,11 +40,9 @@ impl BlobFinder {
     pub fn find(
         &self,
         mask: &Mat,
-        settings: &Settings,
+        _settings: &Settings,
         pf: &mut perf::Frame,
     ) -> Result<Vec<Blob>, String> {
-        let bg = &settings.background;
-
         pf.start(crate::perf::stage::BLOBS);
         let result = (|| -> Result<Vec<Blob>, String> {
             pf.start(crate::perf::stage::BL_FIND);
@@ -61,10 +59,15 @@ impl BlobFinder {
 
             pf.start(crate::perf::stage::BL_FILTER);
             let mut found: Vec<Blob> = Vec::new();
+            let min_area = crate::tuning::blob_min_area();
+            let max_area = crate::tuning::blob_max_area();
+            let min_aspect = crate::tuning::blob_min_aspect();
+            let max_aspect = crate::tuning::blob_max_aspect();
+            let min_fill = crate::tuning::blob_min_fill();
             for contour in contours.iter() {
                 let area = opencv::imgproc::contour_area_def(&contour)
                     .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot measure a contour: ")))?;
-                if area < bg.MIN_AREA as f64 || area > bg.MAX_AREA as f64 {
+                if area < min_area as f64 || area > max_area as f64 {
                     continue;
                 }
                 let rect = opencv::imgproc::bounding_rect(&contour)
@@ -74,7 +77,7 @@ impl BlobFinder {
                 }
 
                 let aspect = rect.width as f64 / rect.height as f64;
-                if aspect < bg.MIN_ASPECT || aspect > bg.MAX_ASPECT {
+                if aspect < min_aspect || aspect > max_aspect {
                     continue;
                 }
 
@@ -85,7 +88,7 @@ impl BlobFinder {
                 // can receive, because its box straddles both and its bottom
                 // edge belongs to neither.
                 let fill = area / (rect.width as f64 * rect.height as f64);
-                if fill < bg.MIN_FILL {
+                if fill < min_fill {
                     continue;
                 }
 

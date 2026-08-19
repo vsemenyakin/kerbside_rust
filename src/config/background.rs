@@ -30,16 +30,8 @@ crate::settings_group! {
         OPEN_KERNEL: i32 = 5,
         CLOSE_KERNEL: i32 = 9,
 
-        // Blob acceptance, in working-frame pixels.
-        MIN_AREA: i64 = 135,
-        MAX_AREA: i64 = 14_600,
-        // Vehicles are wider than tall in this view, but a motorcycle is not, so
-        // the band is generous. Beyond it the blob is a shadow smear or two
-        // vehicles merged.
-        MIN_ASPECT: f64 = 0.35,
-        MAX_ASPECT: f64 = 4.5,
-        // Contour area over bounding-box area. A vehicle is roughly convex; a
-        // merged pair or a shadow trail is not.
-        MIN_FILL: f64 = 0.42,
+        // Blob-acceptance geometry (min/max area, aspect band, fill ratio) was
+        // plaintext here; fixed and never operator-set, it moved to crate::tuning
+        // (encrypted, materialised at use). See tuning.rs "relocated from config".
     }
 }

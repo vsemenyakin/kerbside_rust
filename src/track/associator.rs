@@ -98,11 +98,12 @@ impl Associator {
         pf.start(crate::perf::stage::ASSOC);
 
         pf.start(crate::perf::stage::AS_SCORE);
+        let min_iou = crate::tuning::assoc_min_iou();
         let mut scored: Vec<(f64, usize, usize)> = Vec::new();
         for (bi, blob) in blobs.iter().enumerate() {
             for (vi, vehicle) in self.vehicles.iter().enumerate() {
                 let overlap = blob.box_.iou(&vehicle.box_);
-                if overlap >= trk.MIN_IOU {
+                if overlap >= min_iou {
                     // Negated so a plain ascending sort puts the best first.
                     scored.push((-overlap, bi, vi));
                 }
@@ -126,6 +127,7 @@ impl Associator {
         let mut used_blobs: Vec<bool> = vec![false; blobs.len()];
         let mut used_vehicles: Vec<bool> = vec![false; self.vehicles.len()];
         let mut matched: Vec<Match> = Vec::new();
+        let confirm_frames = crate::tuning::confirm_frames();
         for (_score, bi, vi) in &scored {
             if used_blobs[*bi] || used_vehicles[*vi] {
                 continue;
@@ -138,7 +140,7 @@ impl Associator {
             vehicle.coverage = coverage_value;
             vehicle.hits += 1;
             vehicle.misses = 0;
-            if !vehicle.confirmed && vehicle.hits >= trk.CONFIRM_FRAMES {
+            if !vehicle.confirmed && vehicle.hits >= confirm_frames {
                 vehicle.confirmed = true;
             }
             matched.push(Match {
@@ -160,7 +162,7 @@ impl Associator {
         // frame where it merged with the vehicle beside it. Retiring
         // immediately would split one vehicle into two measurements, each over
         // half the baseline and both therefore rejected.
-        let max_misses = trk.MAX_MISSES;
+        let max_misses = crate::tuning::max_misses();
         self.vehicles.retain(|v| v.misses <= max_misses);
 
         for (bi, blob) in blobs.iter().enumerate() {

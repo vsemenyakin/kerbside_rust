@@ -146,6 +146,11 @@ impl EnforcementGate {
 
         let mut verdicts = Vec::with_capacity(states.len());
         let mut live: Vec<i64> = Vec::with_capacity(states.len());
+        let min_samples = crate::tuning::gate_min_samples();
+        let min_baseline_m = crate::tuning::gate_min_baseline_m();
+        let max_fit_residual_m = crate::tuning::gate_max_fit_residual_m();
+        let stability_frames = crate::tuning::gate_stability_frames();
+        let min_coverage = crate::tuning::min_coverage();
         for state in states {
             live.push(state.vehicle_id);
             let limit = limit_for(state, settings);
@@ -153,10 +158,10 @@ impl EnforcementGate {
 
             let in_zone = state.in_zone;
             let confirmed = state.confirmed;
-            let enough_samples = state.samples >= enf.MIN_SAMPLES;
-            let enough_baseline = state.baseline_m >= enf.MIN_BASELINE_M;
-            let fit_good = state.fit_residual_m <= enf.MAX_FIT_RESIDUAL_M && state.speed_kph > 0.0;
-            let confident = state.coverage >= settings.model.MIN_COVERAGE;
+            let enough_samples = state.samples >= min_samples;
+            let enough_baseline = state.baseline_m >= min_baseline_m;
+            let fit_good = state.fit_residual_m <= max_fit_residual_m && state.speed_kph > 0.0;
+            let confident = state.coverage >= min_coverage;
             let over_limit = state.speed_kph > threshold;
 
             // Debounce per vehicle. A speed sitting within a fraction of a km/h
@@ -166,7 +171,7 @@ impl EnforcementGate {
             let entry = self.streaks.entry(state.vehicle_id).or_insert(0);
             *entry = if over_limit { *entry + 1 } else { 0 };
             let streak = *entry;
-            let stable = streak >= enf.STABILITY_FRAMES;
+            let stable = streak >= stability_frames;
 
             let violation = in_zone
                 && confirmed

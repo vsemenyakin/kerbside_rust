@@ -27,28 +27,10 @@ crate::settings_group! {
         // work, and that cost buys the far half of the zone.
         STRIDE: i32 = 4,
 
-        // Run every Nth frame. At 50 fps this is ~13 detections per second,
-        // which is several per vehicle across the zone -- enough to classify it
-        // and to correct a drifting association, and not enough to matter to the
-        // budget.
-        EVERY_N_FRAMES: i64 = 4,
+        // EVERY_N_FRAMES (detector duty cycle) moved to crate::tuning.
 
-        // Cell likelihood above which a cell is counted as vehicle.
-        //
-        // This is a *linear response*, not a probability: the head is a single
-        // fitted linear layer with no squashing function, so it sits near 0 for
-        // road and near 1 for vehicle but is bounded by neither.
-        VEHICLE_THRESHOLD: f64 = 0.19,
-        // Fraction of a blob's cells that must clear VEHICLE_THRESHOLD before
-        // the blob is accepted as a vehicle.
-        //
-        // A coverage fraction rather than a mean: a mean is dragged down by the
-        // road visible around a vehicle inside its own bounding box, and dragged
-        // up by one strongly-firing cell on a blob that is mostly shadow. The
-        // fraction asks the question that actually matters -- how much of this
-        // blob looks like vehicle -- and answers it the same way at both ends of
-        // the zone.
-        MIN_COVERAGE: f64 = 0.34,
+        // VEHICLE_THRESHOLD (per-cell vehicle likelihood) and MIN_COVERAGE
+        // (fraction of a blob's cells that must clear it) moved to crate::tuning.
 
         // Single-threaded and sequential. Letting the runtime take every core
         // makes this one call faster and the frame slower: it preempts the

@@ -65,3 +65,38 @@ pub fn gate_coast_margin_kph() -> f64 { encf!(1.85) }
 pub fn gate_lane_change_blackout() -> i64 { enci!(12) }
 /// Fraction of a vehicle's in-zone samples that must be uninterrupted.
 pub fn gate_min_contiguity() -> f64 { encf!(0.68) }
+
+
+// ===========================================================================
+// Relocated from `config/*` (were plaintext defaults there).
+//
+// Fixed, non-operator-tunable numbers that happened to live in the settings
+// groups as plain f64/i64 literals -- and were therefore recoverable by a float
+// scan of the binary. None is overridden by any CLI flag, profile or test, so
+// per the note at the top of this module they belong here: encrypted at rest
+// and materialised only at the use-site, deep in the frame loop.
+// ===========================================================================
+
+// -- blob geometry filter (was config/background.rs) --
+pub fn blob_min_area() -> i64 { enci!(135) }
+pub fn blob_max_area() -> i64 { enci!(14_600) }
+pub fn blob_min_aspect() -> f64 { encf!(0.35) }
+pub fn blob_max_aspect() -> f64 { encf!(4.5) }
+pub fn blob_min_fill() -> f64 { encf!(0.42) }
+
+// -- detector scoring (was config/model.rs) --
+pub fn infer_every_n_frames() -> i64 { enci!(4) }
+pub fn vehicle_threshold() -> f64 { encf!(0.19) }
+pub fn min_coverage() -> f64 { encf!(0.34) }
+
+// -- association / lifecycle (was config/tracking.rs) --
+pub fn assoc_min_iou() -> f64 { encf!(0.34) }
+pub fn confirm_frames() -> i64 { enci!(4) }
+pub fn max_misses() -> i64 { enci!(10) }
+pub fn track_max_jump_m() -> f64 { encf!(1.5) }
+
+// -- enforcement gate thresholds (was config/enforcement.rs) --
+pub fn gate_min_samples() -> usize { enci!(20) as usize }
+pub fn gate_min_baseline_m() -> f64 { encf!(12.0) }
+pub fn gate_max_fit_residual_m() -> f64 { encf!(0.42) }
+pub fn gate_stability_frames() -> i64 { enci!(5) }
