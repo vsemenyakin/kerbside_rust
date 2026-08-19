@@ -136,7 +136,7 @@ pub struct Pipeline {
     budget_ms: f64,
     work_w: i32,
     work_h: i32,
-    background: BackgroundModel,
+    background: Option<BackgroundModel>,
     blob_finder: BlobFinder,
     detector: Option<Detector>,
     associator: Associator,
@@ -161,16 +161,18 @@ impl Pipeline {
         let work_w = (settings.video.FRAME_WIDTH as f64 * scale) as i32;
         let work_h = (settings.video.FRAME_HEIGHT as f64 * scale) as i32;
 
-        let background = BackgroundModel::new(settings, (work_h, work_w))?;
-        let warm_frames = background.warm_frames(settings);
-
+        // The background model is built lazily, on the first frame, not here --
+        // see `process_frame`. That keeps its MOG2 / structuring-element library
+        // calls (and the parameters they carry) behind a full frame render,
+        // where the setup-time emulation a reverse-engineer uses to read
+        // library-call arguments cannot reach them.
         Ok(Self {
             consumers,
             settings_provider,
             budget_ms: settings.telemetry.BUDGET_MS,
             work_w,
             work_h,
-            background,
+            background: None,
             blob_finder: BlobFinder::new(settings, (work_h, work_w)),
             detector: if settings.model.ENABLED {
                 Some(Detector::new(settings)?)
@@ -180,7 +182,7 @@ impl Pipeline {
             associator: Associator::new(settings),
             measurer: SpeedMeasurer::new(settings)?,
             gate: EnforcementGate::new(settings),
-            warm_frames,
+            warm_frames: i64::MAX,
             likelihood: None,
             last_frame_id: Arc::new(AtomicI64::new(-1)),
             mailbox: Arc::new(Mailbox::new(lockstep)),
@@ -234,7 +236,24 @@ impl Pipeline {
             _ => None,
         };
 
-        let (mask, foreground_ratio) = self.background.apply(working.get(), &mut pf)?;
+        // Deferred construction: the background model is created on the first
+        // frame, after that frame has been synthesised, rather than at startup.
+        // This puts its `createBackgroundSubtractorMOG2` and
+        // `getStructuringElement` calls -- and the parameters they carry -- past
+        // a full render, out of reach of the cheap setup-time emulation a
+        // reverse-engineer uses to read library-call arguments. MOG2 is stateful,
+        // so building it here still lets it see frame 0 as its first input: the
+        // state evolution, and every result, is identical.
+        if self.background.is_none() {
+            let bg = BackgroundModel::new(settings, (self.work_h, self.work_w))?;
+            self.warm_frames = bg.warm_frames(settings);
+            self.background = Some(bg);
+        }
+        let (mask, foreground_ratio) = self
+            .background
+            .as_mut()
+            .expect("built on the line above")
+            .apply(working.get(), &mut pf)?;
         let mut blobs = self.blob_finder.find(&mask, settings, &mut pf)?;
 
         // Whether the model ran, not whether it was *timed*. Deriving this from
