@@ -95,9 +95,9 @@ impl Associator {
     ) -> Vec<Match> {
         let trk = &settings.tracking;
 
-        pf.start("assoc");
+        pf.start(crate::perf::stage::ASSOC);
 
-        pf.start("as_score");
+        pf.start(crate::perf::stage::AS_SCORE);
         let mut scored: Vec<(f64, usize, usize)> = Vec::new();
         for (bi, blob) in blobs.iter().enumerate() {
             for (vi, vehicle) in self.vehicles.iter().enumerate() {
@@ -108,9 +108,9 @@ impl Associator {
                 }
             }
         }
-        pf.end("as_score");
+        pf.end(crate::perf::stage::AS_SCORE);
 
-        pf.start("as_pick");
+        pf.start(crate::perf::stage::AS_PICK);
         // The Python sorts tuples, so ties on overlap fall back to blob index
         // and then vehicle index. Reproducing that ordering exactly is what
         // keeps two implementations assigning the same blob to the same track
@@ -147,9 +147,9 @@ impl Associator {
                 coverage: coverage_value,
             });
         }
-        pf.end("as_pick");
+        pf.end(crate::perf::stage::AS_PICK);
 
-        pf.start("as_life");
+        pf.start(crate::perf::stage::AS_LIFE);
         for (vi, vehicle) in self.vehicles.iter_mut().enumerate() {
             vehicle.age += 1;
             if !used_vehicles[vi] {
@@ -177,9 +177,9 @@ impl Associator {
             ));
             self.next_id += 1;
         }
-        pf.end("as_life");
+        pf.end(crate::perf::stage::AS_LIFE);
 
-        pf.end("assoc");
+        pf.end(crate::perf::stage::ASSOC);
         matched
     }
 

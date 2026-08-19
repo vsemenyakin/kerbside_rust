@@ -125,9 +125,9 @@ fn measure() -> HashMap<String, f64> {
 #[test]
 fn every_declared_stage_reports_a_time() {
     let timings = timings();
-    for stage in perf::STAGES {
+    for stage in perf::stage_names() {
         assert!(
-            timings.contains_key(stage),
+            timings.contains_key(stage.as_str()),
             "stage {stage:?} is declared but never written to the perf CSV"
         );
     }

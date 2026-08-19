@@ -45,9 +45,9 @@ impl BlobFinder {
     ) -> Result<Vec<Blob>, String> {
         let bg = &settings.background;
 
-        pf.start("blobs");
+        pf.start(crate::perf::stage::BLOBS);
         let result = (|| -> Result<Vec<Blob>, String> {
-            pf.start("bl_find");
+            pf.start(crate::perf::stage::BL_FIND);
             let mut contours: Vector<Vector<CvPoint>> = Vector::new();
             opencv::imgproc::find_contours(
                 mask,
@@ -57,9 +57,9 @@ impl BlobFinder {
                 CvPoint::new(0, 0),
             )
             .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot extract contours: ")))?;
-            pf.end("bl_find");
+            pf.end(crate::perf::stage::BL_FIND);
 
-            pf.start("bl_filter");
+            pf.start(crate::perf::stage::BL_FILTER);
             let mut found: Vec<Blob> = Vec::new();
             for contour in contours.iter() {
                 let area = opencv::imgproc::contour_area_def(&contour)
@@ -101,10 +101,10 @@ impl BlobFinder {
                     contour: contour.iter().map(|p| (p.x, p.y)).collect(),
                 });
             }
-            pf.end("bl_filter");
+            pf.end(crate::perf::stage::BL_FILTER);
             Ok(found)
         })();
-        pf.end("blobs");
+        pf.end(crate::perf::stage::BLOBS);
         result
     }
 }

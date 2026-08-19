@@ -220,9 +220,9 @@ impl Pipeline {
         let settings = settings.as_ref();
         let mut pf = perf::Frame::new(frame.frame_id);
 
-        pf.start("pre");
+        pf.start(crate::perf::stage::PRE);
         let working = SharedMat::new(to_working(frame.full.get(), self.work_w, self.work_h)?);
-        pf.end("pre");
+        pf.end(crate::perf::stage::PRE);
 
         // Submit the inference *before* the background model so it overlaps.
         // See `detect::detector` -- this ordering is the whole reason the model
@@ -242,16 +242,16 @@ impl Pipeline {
         // the sort of thing that turns a benchmark into a different program.
         let inference_ran = pending.is_some();
 
-        pf.start("infer_join");
+        pf.start(crate::perf::stage::INFER_JOIN);
         if let Some(pending) = pending {
             let inference = pending
                 .recv()
                 .map_err(|_| obfstr::obfstr!("the detector thread stopped before answering").to_string())??;
             self.likelihood = Some(inference.likelihood);
-            pf.set("infer", inference.infer_ms);
+            pf.set(crate::perf::stage::INFER, inference.infer_ms);
             perf::counters().inferences.fetch_add(1, Ordering::Relaxed);
         }
-        pf.end("infer_join");
+        pf.end(crate::perf::stage::INFER_JOIN);
 
         // A frame where most of the image is foreground is not a frame with a
         // lot of traffic in it -- it is a frame where something happened to the
@@ -309,7 +309,7 @@ impl Pipeline {
             .map(|v| (v.vehicle_id, v.observations.as_slice()))
             .collect();
 
-        pf.start("emit");
+        pf.start(crate::perf::stage::EMIT);
         let output = self.consumers.run(
             frame,
             result,
@@ -320,10 +320,10 @@ impl Pipeline {
             &mut pf,
             &observations,
         )?;
-        pf.end("emit");
+        pf.end(crate::perf::stage::EMIT);
 
         let elapsed_ms = began.elapsed().as_secs_f64() * 1000.0;
-        pf.set("total", elapsed_ms);
+        pf.set(crate::perf::stage::TOTAL, elapsed_ms);
         let counters = perf::counters();
         counters.note_frame(elapsed_ms, self.budget_ms);
         counters.dropped.store(

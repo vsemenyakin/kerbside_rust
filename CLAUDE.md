@@ -185,10 +185,18 @@ barrier, so a float scan of `.rodata` no longer finds them and the contiguous
 survey table is gone. Diagnostic message text is likewise encrypted with `obfstr`.
 Both defeat a *static* read of the binary, **not a RAM dump** — the decoded values
 and strings sit in memory while the process runs. Neither is total: a value that
-recurs as an unrelated literal elsewhere still leaks, and strings in `const`/`static`
-arrays (`perf::STAGES`, the CSV columns, `USAGE`) or inside `format!`/`println!`/
-`panic!` literals cannot be wrapped. OLLVM, on top, obscures the *logic* (A1); the
-port changes the *names*. `model/vehicle.onnx` is copied next to the binary by
+recurs as an unrelated literal elsewhere still leaks. The residual strings are the
+ones the device emits verbatim anyway — chiefly `output::COLUMNS`, the result-CSV
+header that is the port's correctness oracle (`tools/compare_runs.py`) — plus
+plumbing the binary cannot hide (the `libonnxruntime` filename and the ONNX node
+names, which live in the dependency and the model file, and OpenCV's symbol names).
+`perf::STAGES` was once listed here; it is now `perf::stage_names()`, decoded at run
+time only to write the perf-CSV header, while the hot-path call sites carry integer
+indices (`perf::stage::*`) rather than names. `USAGE`, the gate reason labels and
+the `format!`/`println!`/`panic!` diagnostics are wrapped by moving their literal
+text into `obfstr` arguments — a `const` becomes a function, a `match` on a name
+becomes indices or an `if`/`else` chain. OLLVM, on top, obscures the *logic* (A1);
+the port changes the *names*. `model/vehicle.onnx` is copied next to the binary by
 `build.rs`, not embedded.
 
 ## Conventions

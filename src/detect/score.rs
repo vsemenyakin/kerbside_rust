@@ -54,8 +54,8 @@ pub fn score_blobs(
     let sx = grid_w as f64 / work_w as f64;
     let sy = grid_h as f64 / work_h as f64;
 
-    pf.start("score");
-    pf.start("sc_sample");
+    pf.start(crate::perf::stage::SCORE);
+    pf.start(crate::perf::stage::SC_SAMPLE);
     let mut scores = Vec::with_capacity(blobs.len());
     for blob in blobs {
         let b = &blob.box_;
@@ -82,8 +82,8 @@ pub fn score_blobs(
         let cells = (y1 - y0) * (x1 - x0);
         scores.push(over as f64 / cells as f64);
     }
-    pf.end("sc_sample");
-    pf.end("score");
+    pf.end(crate::perf::stage::SC_SAMPLE);
+    pf.end(crate::perf::stage::SCORE);
     scores
 }
 

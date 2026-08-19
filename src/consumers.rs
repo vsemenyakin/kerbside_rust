@@ -488,7 +488,7 @@ impl ConsumerChain {
         pf: &mut perf::Frame,
         observations: &[(i64, &[Observation])],
     ) -> Result<Arc<FrameOutput>, String> {
-        pf.start("em_record");
+        pf.start(crate::perf::stage::EM_RECORD);
         let record = if self.record_enabled {
             Some(build_evidence_record(
                 &frame,
@@ -501,7 +501,7 @@ impl ConsumerChain {
         } else {
             None
         };
-        pf.end("em_record");
+        pf.end(crate::perf::stage::EM_RECORD);
 
         let output = Arc::new(FrameOutput {
             frame,

@@ -37,39 +37,69 @@ use std::time::{Duration, Instant};
 
 /// Ordered stage names. A row is one float per name, in this order. Keeping it
 /// a flat array rather than a map is what makes the row cheap to build.
-pub const STAGES: [&str; 21] = [
-    "pre",
-    "bg",
-    "morph",
-    "blobs",
-    "bl_find",
-    "bl_filter",
-    "infer_join",
-    "infer",
-    "score",
-    "sc_sample",
-    "assoc",
-    "as_score",
-    "as_pick",
-    "as_life",
-    "speed",
-    "sp_project",
-    "sp_fit",
-    "gate",
-    "emit",
-    "em_record",
-    "total",
-];
+/// Number of instrumented stages. The per-frame perf row is a flat array
+/// indexed by the `stage::*` constants below, so this must be a compile-time
+/// constant.
+pub const STAGE_COUNT: usize = 21;
 
-/// Index of a stage name, resolved once at each call site by the compiler when
-/// the name is a literal. A miss is a programming error, so it panics rather
-/// than silently writing into the wrong column.
-#[inline]
-fn index_of(stage: &str) -> usize {
-    match STAGES.iter().position(|s| *s == stage) {
-        Some(i) => i,
-        None => panic!("unknown perf stage {stage:?}; add it to perf::STAGES"),
-    }
+/// Column indices into the perf row. Call sites pass one of these instead of a
+/// stage-name string, so no stage name reaches .rodata at the call site -- the
+/// names exist only as ciphertext, reconstructed once for the CSV header by
+/// [`stage_names`]. Order defines the CSV column order and must match it.
+pub mod stage {
+    pub const PRE: usize = 0;
+    pub const BG: usize = 1;
+    pub const MORPH: usize = 2;
+    pub const BLOBS: usize = 3;
+    pub const BL_FIND: usize = 4;
+    pub const BL_FILTER: usize = 5;
+    pub const INFER_JOIN: usize = 6;
+    pub const INFER: usize = 7;
+    pub const SCORE: usize = 8;
+    pub const SC_SAMPLE: usize = 9;
+    pub const ASSOC: usize = 10;
+    pub const AS_SCORE: usize = 11;
+    pub const AS_PICK: usize = 12;
+    pub const AS_LIFE: usize = 13;
+    pub const SPEED: usize = 14;
+    pub const SP_PROJECT: usize = 15;
+    pub const SP_FIT: usize = 16;
+    pub const GATE: usize = 17;
+    pub const EMIT: usize = 18;
+    pub const EM_RECORD: usize = 19;
+    pub const TOTAL: usize = 20;
+}
+
+/// The stage names, decoded once into 'static storage. Used only to write the
+/// perf-CSV header, so the plaintext never sits in .rodata -- it is
+/// reconstructed here at run time. Order matches the `stage::*` indices.
+pub fn stage_names() -> &'static [String; STAGE_COUNT] {
+    static NAMES: OnceLock<[String; STAGE_COUNT]> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        [
+            obfstr::obfstr!("pre").to_string(),
+            obfstr::obfstr!("bg").to_string(),
+            obfstr::obfstr!("morph").to_string(),
+            obfstr::obfstr!("blobs").to_string(),
+            obfstr::obfstr!("bl_find").to_string(),
+            obfstr::obfstr!("bl_filter").to_string(),
+            obfstr::obfstr!("infer_join").to_string(),
+            obfstr::obfstr!("infer").to_string(),
+            obfstr::obfstr!("score").to_string(),
+            obfstr::obfstr!("sc_sample").to_string(),
+            obfstr::obfstr!("assoc").to_string(),
+            obfstr::obfstr!("as_score").to_string(),
+            obfstr::obfstr!("as_pick").to_string(),
+            obfstr::obfstr!("as_life").to_string(),
+            obfstr::obfstr!("speed").to_string(),
+            obfstr::obfstr!("sp_project").to_string(),
+            obfstr::obfstr!("sp_fit").to_string(),
+            obfstr::obfstr!("gate").to_string(),
+            obfstr::obfstr!("emit").to_string(),
+            obfstr::obfstr!("em_record").to_string(),
+            obfstr::obfstr!("total").to_string(),
+        ]
+    })
 }
 
 /// The tier-2 gate.
@@ -145,11 +175,17 @@ impl Counters {
         let over = self.over_budget.load(Ordering::Relaxed);
         let pct = 100.0 * over as f64 / frames as f64;
         format!(
-            "perf: {frames} frames  mean {mean:.2} ms  max {:.2} ms  \
-             over-budget {over} ({pct:.2}%)  dropped {}  inferences {}  violations {}",
+            "{}{frames}{}{mean:.2}{}{:.2}{}{over} ({pct:.2}%){}{}{}{}{}{}",
+            obfstr::obfstr!("perf: "),
+            obfstr::obfstr!(" frames  mean "),
+            obfstr::obfstr!(" ms  max "),
             self.max_ms(),
+            obfstr::obfstr!(" ms  over-budget "),
+            obfstr::obfstr!("  dropped "),
             self.dropped.load(Ordering::Relaxed),
+            obfstr::obfstr!("  inferences "),
             self.inferences.load(Ordering::Relaxed),
+            obfstr::obfstr!("  violations "),
             self.violations.load(Ordering::Relaxed),
         )
     }
@@ -197,40 +233,39 @@ pub fn counters() -> &'static Counters {
 /// is why the timestamp is per stage rather than a single field.
 pub struct Frame {
     pub frame_id: i64,
-    pub values: [f64; STAGES.len()],
-    starts: [Option<Instant>; STAGES.len()],
+    pub values: [f64; STAGE_COUNT],
+    starts: [Option<Instant>; STAGE_COUNT],
 }
 
 impl Frame {
     pub fn new(frame_id: i64) -> Self {
         Self {
             frame_id,
-            values: [0.0; STAGES.len()],
-            starts: [None; STAGES.len()],
+            values: [0.0; STAGE_COUNT],
+            starts: [None; STAGE_COUNT],
         }
     }
 
     #[inline]
-    pub fn start(&mut self, stage: &str) {
+    pub fn start(&mut self, stage: usize) {
         if is_on() {
-            self.starts[index_of(stage)] = Some(Instant::now());
+            self.starts[stage] = Some(Instant::now());
         }
     }
 
     #[inline]
-    pub fn end(&mut self, stage: &str) {
+    pub fn end(&mut self, stage: usize) {
         if is_on() {
-            let i = index_of(stage);
-            if let Some(began) = self.starts[i].take() {
-                self.values[i] = began.elapsed().as_secs_f64() * 1000.0;
+            if let Some(began) = self.starts[stage].take() {
+                self.values[stage] = began.elapsed().as_secs_f64() * 1000.0;
             }
         }
     }
 
     #[inline]
-    pub fn set(&mut self, stage: &str, value: f64) {
+    pub fn set(&mut self, stage: usize, value: f64) {
         if is_on() {
-            self.values[index_of(stage)] = value;
+            self.values[stage] = value;
         }
     }
 }
@@ -242,7 +277,7 @@ impl Frame {
 /// are dropped from the front -- losing measurements is strictly better than
 /// perturbing what is measured.
 struct Writer {
-    rows: Mutex<VecDeque<(i64, [f64; STAGES.len()])>>,
+    rows: Mutex<VecDeque<(i64, [f64; STAGE_COUNT])>>,
     wake: Condvar,
     stop: Mutex<bool>,
     flush: Duration,
@@ -267,7 +302,7 @@ impl Writer {
     }
 
     fn drain_to(&self, out: &mut BufWriter<File>) {
-        let chunk: Vec<(i64, [f64; STAGES.len()])> = {
+        let chunk: Vec<(i64, [f64; STAGE_COUNT])> = {
             let mut rows = match self.rows.lock() {
                 Ok(rows) => rows,
                 Err(poisoned) => poisoned.into_inner(),
@@ -275,7 +310,7 @@ impl Writer {
             rows.drain(..).collect()
         };
         for (frame_id, values) in chunk {
-            let mut line = String::with_capacity(8 + STAGES.len() * 8);
+            let mut line = String::with_capacity(8 + STAGE_COUNT * 8);
             line.push_str(&frame_id.to_string());
             for value in values {
                 line.push(',');
@@ -312,7 +347,7 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     let mut file = BufWriter::new(
         File::create(&path).map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot open "), path.display()))?,
     );
-    writeln!(file, "frame_id,{}", STAGES.join(","))
+    writeln!(file, "frame_id,{}", stage_names().as_slice().join(","))
         .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot write the perf header: ")))?;
     file.flush().map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot flush "), path.display()))?;
 

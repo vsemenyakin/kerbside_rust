@@ -108,7 +108,7 @@ impl BackgroundModel {
     /// to track the resulting garbage.
     pub fn apply(&mut self, working: &Mat, pf: &mut perf::Frame) -> Result<(Mat, f64), String> {
         let mut mask = Mat::default();
-        pf.start("bg");
+        pf.start(crate::perf::stage::BG);
         // Disambiguated explicitly: `Ptr<BackgroundSubtractorMOG2>` inherits an
         // `apply` from both the base and the MOG2 trait. The Python calls the
         // MOG2 one, which is the one that honours `learningRate`.
@@ -119,9 +119,9 @@ impl BackgroundModel {
             self.learning_rate,
         )
         .map_err(|e| format!("{}{e}", obfstr::obfstr!("the background model failed: ")))?;
-        pf.end("bg");
+        pf.end(crate::perf::stage::BG);
 
-        pf.start("morph");
+        pf.start(crate::perf::stage::MORPH);
         // Shadows first: MOG2 marks them with a value of its own, so they are
         // removed by thresholding rather than by a morphological guess.
         if self.shadow_value != 0 {
@@ -160,7 +160,7 @@ impl BackgroundModel {
         )
         .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot close the foreground mask: ")))?;
         mask = closed;
-        pf.end("morph");
+        pf.end(crate::perf::stage::MORPH);
 
         let set = opencv::core::count_non_zero(&mask)
             .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot measure the foreground: ")))?;

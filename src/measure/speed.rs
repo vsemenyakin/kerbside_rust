@@ -92,9 +92,9 @@ impl SpeedMeasurer {
         settings: &Settings,
         pf: &mut perf::Frame,
     ) {
-        pf.start("speed");
+        pf.start(crate::perf::stage::SPEED);
 
-        pf.start("sp_project");
+        pf.start(crate::perf::stage::SP_PROJECT);
         for m in matched {
             let blob = match blobs.get(m.blob_index) {
                 Some(blob) => blob,
@@ -137,17 +137,17 @@ impl SpeedMeasurer {
             vehicle.in_zone = self.zone.0 <= along && along <= self.zone.1;
             vehicle.length_m = length;
         }
-        pf.end("sp_project");
+        pf.end(crate::perf::stage::SP_PROJECT);
 
-        pf.start("sp_fit");
+        pf.start(crate::perf::stage::SP_FIT);
         for m in matched {
             if let Some(index) = vehicles.iter().position(|v| v.vehicle_id == m.vehicle_id) {
                 Self::fit(&mut vehicles[index], settings);
             }
         }
-        pf.end("sp_fit");
+        pf.end(crate::perf::stage::SP_FIT);
 
-        pf.end("speed");
+        pf.end(crate::perf::stage::SPEED);
     }
 
     /// Has this track just been handed a different vehicle?
