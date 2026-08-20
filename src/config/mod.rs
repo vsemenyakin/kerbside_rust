@@ -86,7 +86,7 @@ mod tracking;
 mod video;
 
 pub use background::BackgroundSettings;
-pub use calibration::CalibrationSettings;
+pub use calibration::{survey_image_points, survey_world_points, CalibrationSettings};
 pub use enforcement::EnforcementSettings;
 pub use model::ModelSettings;
 pub use telemetry::TelemetrySettings;

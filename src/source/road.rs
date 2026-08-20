@@ -133,8 +133,8 @@ impl RoadScene {
         // homography with a downscale of 1. The application builds the same
         // survey at working resolution. Both describe the same road.
         let homography = Homography::from_survey(
-            &cal.IMAGE_POINTS,
-            &cal.WORLD_POINTS,
+            &crate::config::survey_image_points(),
+            &crate::config::survey_world_points(),
             1.0,
             (cal.ZONE_START_M, cal.ZONE_END_M),
         )?;

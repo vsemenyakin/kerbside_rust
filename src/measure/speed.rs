@@ -44,8 +44,8 @@ use crate::track::types::{Observation, Vehicle};
 pub fn build_homography(settings: &Settings) -> Result<Homography, String> {
     let cal = &settings.calibration;
     Homography::from_survey(
-        &cal.IMAGE_POINTS,
-        &cal.WORLD_POINTS,
+        &crate::config::survey_image_points(),
+        &crate::config::survey_world_points(),
         settings.video.DOWNSCALE,
         (cal.ZONE_START_M, cal.ZONE_END_M),
     )

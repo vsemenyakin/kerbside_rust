@@ -19,27 +19,14 @@
 
 crate::settings_group! {
     pub struct CalibrationSettings {
-        // Image coordinates of the four survey marks, in FULL-resolution
-        // pixels, clockwise from the near-left. These correspond to
-        // WORLD_POINTS below.
-        // Each coordinate is encrypted at rest (crate::encf!): the survey no
-        // longer appears as a contiguous block of f64 literals in .rodata. The
-        // decode happens once, in Default::default(), so cal.IMAGE_POINTS reads
-        // exactly as before -- see crate::crypt for the mechanism and its limit.
-        IMAGE_POINTS: Vec<(f64, f64)> = vec![
-            (crate::encf!(352.0), crate::encf!(690.0)),
-            (crate::encf!(928.0), crate::encf!(690.0)),
-            (crate::encf!(742.0), crate::encf!(388.0)),
-            (crate::encf!(538.0), crate::encf!(388.0)),
-        ],
-        // The same four marks in road coordinates, metres. X across the
-        // carriageway, Y along it, origin at the near-left mark.
-        WORLD_POINTS: Vec<(f64, f64)> = vec![
-            (crate::encf!(0.0), crate::encf!(0.0)),
-            (crate::encf!(7.3), crate::encf!(0.0)),
-            (crate::encf!(7.3), crate::encf!(40.0)),
-            (crate::encf!(0.0), crate::encf!(40.0)),
-        ],
+        // The survey marks used to live here as encrypted `Vec` fields, but a
+        // Vec field is decoded once into the long-lived Settings struct -- where
+        // a core dump of the running process reads it straight back (RE target
+        // T3; confirmed exploited via a heap scan for the point vectors). They
+        // are now the transient accessors `survey_image_points` /
+        // `survey_world_points` below: decoded from ciphertext into a stack array
+        // only while the homography is built, then dropped. Persistent memory
+        // then holds the derived 3x3 matrix, not the labelled point pairs.
 
         // The stretch of road, in metres along Y, over which speed is measured.
         // Starting past the near mark and ending before the far one keeps the
@@ -54,4 +41,31 @@ crate::settings_group! {
         // the road.
         CONTACT_POINT_RATIO: f64 = crate::encf!(0.06),
     }
+}
+
+/// The four image survey marks (full-resolution pixels), decoded transiently.
+///
+/// Built from `encf!` ciphertext into a stack array at the moment the homography
+/// is constructed, and dropped immediately after -- so the labelled survey never
+/// persists in the heap the way a `Vec` settings field did. See the note in the
+/// struct above and `crate::crypt` for the limit (a RAM dump timed into the
+/// build call would still catch it; the derived matrix remains).
+pub fn survey_image_points() -> [(f64, f64); 4] {
+    [
+        (crate::encf!(352.0), crate::encf!(690.0)),
+        (crate::encf!(928.0), crate::encf!(690.0)),
+        (crate::encf!(742.0), crate::encf!(388.0)),
+        (crate::encf!(538.0), crate::encf!(388.0)),
+    ]
+}
+
+/// The same four marks in road metres, decoded transiently. See
+/// [`survey_image_points`].
+pub fn survey_world_points() -> [(f64, f64); 4] {
+    [
+        (crate::encf!(0.0), crate::encf!(0.0)),
+        (crate::encf!(7.3), crate::encf!(0.0)),
+        (crate::encf!(7.3), crate::encf!(40.0)),
+        (crate::encf!(0.0), crate::encf!(40.0)),
+    ]
 }
