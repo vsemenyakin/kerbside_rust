@@ -321,10 +321,11 @@ pub struct Settings {
     pub telemetry: TelemetrySettings,
 }
 
-/// Startup profile names. Used by the CLI (`--profile`) and by [`apply_profile`]
-/// in both build variants, so it is not gated -- but a profile name is a
-/// user-facing selector, not a field of the schema.
-pub const PROFILE_NAMES: [&str; 3] = ["bench", "replay", "test"];
+// The profile names ("bench"/"replay"/"test") are compared inside
+// `apply_profile` via `obfstr` rather than a plaintext `match`, and the "known"
+// list in the error is an encrypted literal -- so no profile-name string is
+// left in .rodata (they were the `replaybench` residual a memory-forensics
+// report picked up).
 
 #[cfg(feature = "introspection")]
 pub const GROUP_NAMES: [&str; 7] = [
@@ -490,36 +491,33 @@ pub type Override = Box<dyn Fn(&mut Settings)>;
 /// profile table; the values are identical to the ones the reflection path used
 /// to carry as `(name, Value)` pairs.
 fn apply_profile(settings: &mut Settings, name: &str) -> Result<(), String> {
-    match name {
+    // Compared through obfstr, not a plaintext `match`, so the selector strings
+    // do not survive in .rodata.
+    if name == obfstr::obfstr!("replay") {
         // Deterministic: every frame processed, no dropping, no wall-clock branch.
-        "replay" => {
-            settings.telemetry.MEASURE_STAGES = false;
-            settings.telemetry.EVIDENCE_RECORD = true;
-            settings.telemetry.RING_FRAMES = 240;
-        }
+        settings.telemetry.MEASURE_STAGES = false;
+        settings.telemetry.EVIDENCE_RECORD = true;
+        settings.telemetry.RING_FRAMES = 240;
+    } else if name == obfstr::obfstr!("bench") {
         // What the benchmark runs: full instrumentation, no overlay encoding.
-        "bench" => {
-            settings.telemetry.MEASURE_STAGES = true;
-            settings.telemetry.WRITE_OVERLAY = false;
-            settings.telemetry.RING_FRAMES = 500;
-        }
+        settings.telemetry.MEASURE_STAGES = true;
+        settings.telemetry.WRITE_OVERLAY = false;
+        settings.telemetry.RING_FRAMES = 500;
+    } else if name == obfstr::obfstr!("test") {
         // Small and quick, for the test suite.
-        "test" => {
-            settings.video.SCENE_FRAMES = 240;
-            settings.telemetry.MEASURE_STAGES = false;
-            // Both, because the ring depth is derived to cover the pre-trigger
-            // window -- shrinking one without the other has no effect.
-            settings.enforcement.EVIDENCE_PRE_FRAMES = 40;
-            settings.telemetry.RING_FRAMES = 60;
-        }
-        _ => {
-            return Err(format!(
-                "{}{name:?}{}{:?}",
-                obfstr::obfstr!("unknown profile "),
-                obfstr::obfstr!("; known: "),
-                PROFILE_NAMES.as_slice()
-            ))
-        }
+        settings.video.SCENE_FRAMES = 240;
+        settings.telemetry.MEASURE_STAGES = false;
+        // Both, because the ring depth is derived to cover the pre-trigger
+        // window -- shrinking one without the other has no effect.
+        settings.enforcement.EVIDENCE_PRE_FRAMES = 40;
+        settings.telemetry.RING_FRAMES = 60;
+    } else {
+        return Err(format!(
+            "{}{name:?}{}{}",
+            obfstr::obfstr!("unknown profile "),
+            obfstr::obfstr!("; known: "),
+            obfstr::obfstr!("[\"bench\", \"replay\", \"test\"]")
+        ));
     }
     Ok(())
 }
