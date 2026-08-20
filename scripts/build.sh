@@ -150,6 +150,33 @@ if [[ "$PROFILE" == "dist" ]]; then
     # root, which is the kerbside crate's own compile CWD.
     export OBF_PLUGIN
     export RUSTC_WORKSPACE_WRAPPER="$PWD/scripts/obf-rustc-wrapper.sh"
+
+    # --- static OpenCV (shipped binary only) ---------------------------------
+    # Link core/imgproc/video from the system static archives (.a) so their cv::
+    # functions become internal symbols instead of dynamic imports resolved from
+    # libopencv_*.so. That removes the LD_PRELOAD interposition surface a reverse
+    # engineer uses on the running device to read the exact arguments of
+    # createBackgroundSubtractorMOG2 / getPerspectiveTransform /
+    # getStructuringElement. videoio and imgcodecs -- which would drag OpenCV's
+    # FFmpeg/GStreamer/codec backends and cannot be linked statically without ~30
+    # more libraries -- are already excluded here by --no-default-features (the
+    # `overlay` feature is off in dist). Debian ships no -ldev symlinks for
+    # BLAS/LAPACK, so make build-local ones for the three modules' small dep set.
+    OCV_LINKS="$PWD/target/.static-opencv-links"
+    mkdir -p "$OCV_LINKS"
+    for pair in "libblas.so:libblas.so.3" "liblapack.so:liblapack.so.3"; do
+        link="${pair%%:*}"; soname="${pair##*:}"
+        real="$(ls /usr/lib/*/"$soname" 2>/dev/null | head -1)"
+        if [[ -z "$real" ]]; then
+            echo "REFUSING TO BUILD: $soname not found, needed to static-link OpenCV." >&2
+            echo "  Install the runtime (libblas3 / liblapack3) or adjust scripts/build.sh." >&2
+            exit 1
+        fi
+        ln -sf "$real" "$OCV_LINKS/$link"
+    done
+    export OPENCV_INCLUDE_PATHS="/usr/include/opencv4"
+    export OPENCV_LINK_PATHS="/usr/lib/aarch64-linux-gnu,$OCV_LINKS"
+    export OPENCV_LINK_LIBS="static=opencv_video,static=opencv_imgproc,static=opencv_core,lapack,blas,tbb,z,GLX"
     BUILD_STD_ARGS+=(
         "--target" "$HOST_TRIPLE"
         "-Zbuild-std=std,panic_abort"
@@ -164,7 +191,8 @@ if [[ "$PROFILE" == "dist" ]]; then
     echo "toolchain: ${OBF_TOOLCHAIN}  (LLVM matched to plugin)"
     echo "  -Zlocation-detail=none                    (drop panic-site source paths)"
     echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
-    echo "  --no-default-features                     (drop settings field-name strings)"
+    echo "  --no-default-features                     (drop settings field-name strings + overlay)"
+    echo "  static OpenCV core/imgproc/video          (cv:: calls not LD_PRELOAD-interposable)"
     echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
     echo "  --target $HOST_TRIPLE"
 fi

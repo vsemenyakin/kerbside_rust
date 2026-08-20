@@ -13,6 +13,7 @@ path = "src/main.rs"
 [[bin]]
 name = "make_clip"
 path = "src/bin/make_clip.rs"
+required-features = ["overlay"]
 
 [features]
 # Name-based settings reflection: --dump-settings, name-keyed overrides, the
@@ -24,15 +25,24 @@ path = "src/bin/make_clip.rs"
 # reverse engineer would otherwise get for free (T2 of docs/re_scoring.md). The
 # shipped dist build turns it off (scripts/build.sh passes --no-default-features)
 # so those strings never ship. See src/config/mod.rs for the split.
-default = ["introspection"]
+default = ["introspection", "overlay"]
 introspection = []
+
+# Overlay video and image codecs: `--overlay` mp4 output and make_clip's PNG
+# export. A feature because videoio/imgcodecs pull in OpenCV's FFmpeg / GStreamer
+# / codec backends, which cannot be linked statically without dragging ~30 more
+# libraries. The dist build turns it off (scripts/build.sh --no-default-features)
+# so the shipped binary links only core/imgproc/video -- and links them
+# STATICALLY (see scripts/build.sh), putting the algorithm's cv:: calls
+# (MOG2, the homography, morphology) beyond LD_PRELOAD interposition.
+overlay = ["opencv/videoio", "opencv/imgcodecs"]
 
 [dependencies]
 # The same native libraries the Python calls. This is the point of the port:
 # roughly three quarters of the frame is already inside these two, and that
 # share costs exactly the same from Rust. Swapping either for a pure-Rust
 # reimplementation would make the comparison meaningless.
-opencv = { version = "0.100", default-features = false, features = ["imgproc", "video", "videoio", "imgcodecs"] }
+opencv = { version = "0.100", default-features = false, features = ["imgproc", "video"] }
 # `load-dynamic`: ONNX Runtime is opened at run time rather than linked in.
 #
 # Two reasons, and the second is the one that matters for the port evaluation.

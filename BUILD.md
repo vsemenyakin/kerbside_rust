@@ -346,7 +346,7 @@ Two things to know:
 scripts/build.sh
 ```
 
-Same `opt-level` and LTO as `release`, plus **six hardening layers applied
+Same `opt-level` and LTO as `release`, plus **seven hardening layers applied
 together** — this is the shipped, obfuscated artefact:
 
 1. **`strip`** — the symbol table (an ELF carries it in the file; there is no
@@ -375,9 +375,42 @@ together** — this is the shipped, obfuscated artefact:
 6. **String encryption** (`obfstr`, source-level) — the diagnostic message text
    (`"cannot draw the verge"`, `"homography element"`, …) is XOR-encrypted at
    compile time and decoded on the stack at use.
+7. **Static OpenCV** (`dist` only, configured in `scripts/build.sh`) — the
+   `core`/`imgproc`/`video` modules are linked from the system static archives
+   (`/usr/lib/*/libopencv_{core,imgproc,video}.a`, provided by `libopencv-dev`)
+   instead of the shared `libopencv_*.so`. Their `cv::` functions become internal
+   symbols rather than dynamic imports, which removes the `LD_PRELOAD`
+   interposition surface a reverse engineer uses on the running board to read the
+   exact arguments of `createBackgroundSubtractorMOG2`, `getPerspectiveTransform`
+   and `getStructuringElement`. `videoio`/`imgcodecs` — which would drag OpenCV's
+   FFmpeg/GStreamer/codec backends and cannot be linked statically without ~30
+   more libraries — are excluded by `--no-default-features`: the `overlay`
+   feature (which gates `--overlay` mp4 output and make_clip's PNG export) is off
+   in `dist`. The wiring is base `opencv` features `imgproc`+`video` in
+   `Cargo.toml`, `overlay = ["opencv/videoio", "opencv/imgcodecs"]` default-on for
+   `dev`/`release`, and `OPENCV_LINK_LIBS="static=opencv_video,…"` exported for
+   `dist` in `scripts/build.sh` (which also makes build-local `-ldev` symlinks for
+   BLAS/LAPACK under `target/`, since Debian ships none).
 
 Layers 5 and 6 defeat a *static* read of the medium, not a **RAM dump** — the
-decoded values and strings are in memory while the process runs.
+decoded values and strings are in memory while the process runs. Layer 7 goes
+after a *different* attack: `LD_PRELOAD` interposition of OpenCV on the running
+board, which reads library-call arguments directly and is unaffected by 4–6. It
+does not stop `ptrace`/GDB/Frida hooking internal functions, nor differential
+probing of the binary's own output.
+
+**Build-time requirement (`dist` only).** The static link consumes the OpenCV
+*static archives* `libopencv_{core,imgproc,video}.a` and the OpenCV headers —
+both from `libopencv-dev` (already in the apt line above) — and links the
+BLAS/LAPACK runtime (`libblas3` / `liblapack3` / `libgfortran5`), which
+`libopencv-dev` already pulls in as dependencies. `release`/`dev` are unaffected:
+they link OpenCV dynamically via pkg-config, as before.
+
+**Runtime dependencies change with it.** Because OpenCV is now inside the binary,
+the shipped `dist` no longer loads `libopencv_*.so`; instead it needs `liblapack3`,
+`libblas3`, `libtbb12`, `libgfortran5` and `libGLX`/`libX11` present on the
+*deployment* board. Confirm what remains dynamic with `ldd target/dist/kerbside`
+(there should be no `libopencv_*` line).
 
 Measured on this project (obfuscated `dist`):
 

@@ -25,8 +25,11 @@ use std::time::{Duration, Instant};
 
 use kerbside::config::{self, Settings};
 use kerbside::consumers::{ConsumerChain, Consumer, FanOut};
+#[cfg(feature = "overlay")]
 use kerbside::measure::build_homography;
-use kerbside::output::{OverlayWriter, ResultWriter};
+use kerbside::output::ResultWriter;
+#[cfg(feature = "overlay")]
+use kerbside::output::OverlayWriter;
 use kerbside::perf;
 use kerbside::pipeline::types::SharedMat;
 use kerbside::pipeline::{live_settings, Pipeline, RawFrame, RunningPipeline};
@@ -255,6 +258,7 @@ fn run() -> Result<(), String> {
 
     let mut sinks: Vec<Box<dyn Consumer + Send>> = Vec::new();
     sinks.push(Box::new(ResultWriter::new(&args.out)?));
+    #[cfg(feature = "overlay")]
     if let Some(path) = &args.overlay {
         sinks.push(Box::new(OverlayWriter::new(
             &settings,

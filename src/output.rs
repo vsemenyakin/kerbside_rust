@@ -202,6 +202,7 @@ impl Consumer for ResultWriter {
     }
 }
 
+#[cfg(feature = "overlay")]
 /// Renders a human-readable overlay video. Off by default.
 ///
 /// Purely for looking at. It runs on the pipeline thread, so it is not part of
@@ -212,6 +213,7 @@ pub struct OverlayWriter {
     zone: Vector<CvPoint>,
 }
 
+#[cfg(feature = "overlay")]
 impl OverlayWriter {
     pub fn new(settings: &Settings, path: &str, homography: &Homography) -> Result<Self, String> {
         let vid = &settings.video;
@@ -253,6 +255,7 @@ impl OverlayWriter {
     }
 }
 
+#[cfg(feature = "overlay")]
 impl Consumer for OverlayWriter {
     fn consume(&mut self, output: &Arc<FrameOutput>) -> Result<(), String> {
         let mut canvas = output
