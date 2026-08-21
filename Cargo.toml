@@ -28,6 +28,13 @@ required-features = ["overlay"]
 default = ["introspection", "overlay"]
 introspection = []
 
+# Anti-tamper hardening for the shipped build only: PR_SET_DUMPABLE(0) plus a
+# TracerPid check, so a non-root reverse engineer cannot `gdb -p` / `gcore` the
+# running process (the primary technique every RE report in this project relied
+# on). Off by default so dev, release and the test suite stay freely debuggable;
+# scripts/build.sh turns it on for `dist` (--features anti-tamper).
+anti-tamper = []
+
 # Overlay video and image codecs: `--overlay` mp4 output and make_clip's PNG
 # export. A feature because videoio/imgcodecs pull in OpenCV's FFmpeg / GStreamer
 # / codec backends, which cannot be linked statically without dragging ~30 more

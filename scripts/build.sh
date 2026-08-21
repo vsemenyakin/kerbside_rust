@@ -187,12 +187,15 @@ if [[ "$PROFILE" == "dist" ]]; then
         # (IMAGE_POINTS, FRAME_WIDTH, ...) and the derived Debug labels never
         # reach the shipped binary. dev/release keep it (and --dump-settings).
         "--no-default-features"
+        # Anti-tamper (PR_SET_DUMPABLE(0) + TracerPid refusal) -- shipped only.
+        "--features" "anti-tamper"
     )
     echo "toolchain: ${OBF_TOOLCHAIN}  (LLVM matched to plugin)"
     echo "  -Zlocation-detail=none                    (drop panic-site source paths)"
     echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
     echo "  --no-default-features                     (drop settings field-name strings + overlay)"
     echo "  static OpenCV core/imgproc/video          (cv:: calls not LD_PRELOAD-interposable)"
+    echo "  --features anti-tamper                    (PR_SET_DUMPABLE(0) + TracerPid refusal)"
     echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
     echo "  --target $HOST_TRIPLE"
 fi

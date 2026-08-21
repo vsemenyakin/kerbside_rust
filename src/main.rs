@@ -416,7 +416,45 @@ fn thousands(value: u64) -> String {
     out
 }
 
+/// Anti-tamper for the shipped `dist` build (feature `anti-tamper`; off in
+/// dev/release/tests, which stay freely debuggable).
+///
+/// `PR_SET_DUMPABLE = 0` makes the process non-dumpable, so a non-root user can
+/// no longer `ptrace`-attach or `gcore` it -- the cheap method every RE report
+/// here relied on (core-dumping the live process and reading the settings
+/// struct, the OpenCV objects and the decoded strings straight out of RAM). The
+/// `TracerPid` check refuses to run under a debugger attached at start. A
+/// **root** owner of the device defeats both: this raises the cost from a bare
+/// `gcore` to "need root and defeat anti-ptrace", it is not a barrier.
+#[cfg(feature = "anti-tamper")]
+fn harden() {
+    // PR_SET_DUMPABLE (4) = 0 (SUID_DUMP_DISABLE): drop dumpability so a non-root
+    // ptrace/gcore of this process is denied by the kernel.
+    extern "C" {
+        fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
+    }
+    unsafe {
+        prctl(4, 0, 0, 0, 0);
+    }
+    // Already traced at start? Refuse -- quietly, with no anti-debug banner to
+    // steer around.
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("TracerPid:") {
+                if rest.trim() != "0" {
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "anti-tamper"))]
+#[inline]
+fn harden() {}
+
 fn main() -> ExitCode {
+    harden();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
