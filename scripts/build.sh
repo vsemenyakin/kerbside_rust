@@ -187,7 +187,10 @@ if [[ "$PROFILE" == "dist" ]]; then
         # (IMAGE_POINTS, FRAME_WIDTH, ...) and the derived Debug labels never
         # reach the shipped binary. dev/release keep it (and --dump-settings).
         "--no-default-features"
-        # Anti-tamper (PR_SET_DUMPABLE(0) + TracerPid refusal) -- shipped only.
+        # Anti-tamper umbrella (shipped only): three run-time measures gated on
+        # this one feature -- PR_SET_DUMPABLE(0) + TracerPid refusal (main::harden)
+        # and the anti-emulation decode key (crypt::keying, an environment-probed
+        # key so encf!/enci! decode to garbage under an emulator).
         "--features" "anti-tamper"
     )
     echo "toolchain: ${OBF_TOOLCHAIN}  (LLVM matched to plugin)"
@@ -195,7 +198,7 @@ if [[ "$PROFILE" == "dist" ]]; then
     echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
     echo "  --no-default-features                     (drop settings field-name strings + overlay)"
     echo "  static OpenCV core/imgproc/video          (cv:: calls not LD_PRELOAD-interposable)"
-    echo "  --features anti-tamper                    (PR_SET_DUMPABLE(0) + TracerPid refusal)"
+    echo "  --features anti-tamper                    (non-dumpable + TracerPid refusal + anti-emulation decode key)"
     echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
     echo "  --target $HOST_TRIPLE"
 fi
