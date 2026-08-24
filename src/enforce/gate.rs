@@ -146,11 +146,15 @@ impl EnforcementGate {
 
         let mut verdicts = Vec::with_capacity(states.len());
         let mut live: Vec<i64> = Vec::with_capacity(states.len());
-        let min_samples = crate::tuning::gate_min_samples();
-        let min_baseline_m = crate::tuning::gate_min_baseline_m();
-        let max_fit_residual_m = crate::tuning::gate_max_fit_residual_m();
-        let stability_frames = crate::tuning::gate_stability_frames();
-        let min_coverage = crate::tuning::min_coverage();
+        // The gate thresholds are decoded at their point of use *inside* the loop,
+        // deliberately NOT hoisted here. A value hoisted before the loop is held
+        // live across every iteration and spills to a stack slot -- where a live
+        // `/proc/PID/mem` scan reads it straight out (the round-7 route). Decoded
+        // in place, each threshold materialises only for the compare that consumes
+        // it and stays register-only: the same non-residency that kept the tuning
+        // campaign out of every reverse-engineering dump. `encf!`/`enci!` carry a
+        // `black_box` barrier, which also blocks LICM from lifting the decode back
+        // out of the loop. The extra decodes are a handful of XORs per vehicle.
         for state in states {
             live.push(state.vehicle_id);
             let limit = limit_for(state, settings);
@@ -158,10 +162,11 @@ impl EnforcementGate {
 
             let in_zone = state.in_zone;
             let confirmed = state.confirmed;
-            let enough_samples = state.samples >= min_samples;
-            let enough_baseline = state.baseline_m >= min_baseline_m;
-            let fit_good = state.fit_residual_m <= max_fit_residual_m && state.speed_kph > 0.0;
-            let confident = state.coverage >= min_coverage;
+            let enough_samples = state.samples >= crate::tuning::gate_min_samples();
+            let enough_baseline = state.baseline_m >= crate::tuning::gate_min_baseline_m();
+            let fit_good =
+                state.fit_residual_m <= crate::tuning::gate_max_fit_residual_m() && state.speed_kph > 0.0;
+            let confident = state.coverage >= crate::tuning::min_coverage();
             let over_limit = state.speed_kph > threshold;
 
             // Debounce per vehicle. A speed sitting within a fraction of a km/h
@@ -171,7 +176,7 @@ impl EnforcementGate {
             let entry = self.streaks.entry(state.vehicle_id).or_insert(0);
             *entry = if over_limit { *entry + 1 } else { 0 };
             let streak = *entry;
-            let stable = streak >= stability_frames;
+            let stable = streak >= crate::tuning::gate_stability_frames();
 
             let violation = in_zone
                 && confirmed

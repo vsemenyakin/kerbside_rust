@@ -440,6 +440,15 @@ fn harden() {
     }
     unsafe {
         prctl(4, 0, 0, 0, 0);
+        // Read PR_SET_DUMPABLE back (PR_GET_DUMPABLE = 3). The observed bypass is
+        // an LD_PRELOAD shim that no-ops `prctl(PR_SET_DUMPABLE)` so the process
+        // stays dumpable for `gcore`/`/proc/PID/mem`. That shim leaves the real
+        // dumpable flag at 1, so if the read-back is not 0 the set did not take --
+        // refuse, quietly. A shim that also hooks PR_GET_DUMPABLE defeats this; it
+        // is a cost step against exactly the hook seen, not a wall.
+        if prctl(3, 0, 0, 0, 0) != 0 {
+            std::process::exit(1);
+        }
     }
     // Already traced at start? Refuse -- quietly, with no anti-debug banner to
     // steer around.
