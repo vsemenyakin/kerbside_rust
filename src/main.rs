@@ -428,6 +428,11 @@ fn thousands(value: u64) -> String {
 /// `gcore` to "need root and defeat anti-ptrace", it is not a barrier.
 #[cfg(feature = "anti-tamper")]
 fn harden() {
+    // Assemble the anti-emulation decode key from an environment probe, before
+    // any constant is decoded. On real hardware this yields the true key; under
+    // an emulator that stubs the probe (or never runs start-up) it comes out
+    // wrong, so every `encf!`/`enci!` decodes to garbage. See `crypt::keying`.
+    kerbside::crypt::init_keying();
     // PR_SET_DUMPABLE (4) = 0 (SUID_DUMP_DISABLE): drop dumpability so a non-root
     // ptrace/gcore of this process is denied by the kernel.
     extern "C" {
