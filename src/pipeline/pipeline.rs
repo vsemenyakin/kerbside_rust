@@ -265,7 +265,7 @@ impl Pipeline {
         if let Some(pending) = pending {
             let inference = pending
                 .recv()
-                .map_err(|_| obfstr::obfstr!("the detector thread stopped before answering").to_string())??;
+                .map_err(|_| crate::obfstr_err!("the detector thread stopped before answering").to_string())??;
             self.likelihood = Some(inference.likelihood);
             pf.set(crate::perf::stage::INFER, inference.infer_ms);
             perf::counters().inferences.fetch_add(1, Ordering::Relaxed);
@@ -418,8 +418,8 @@ impl RunningPipeline {
         match self.handle.take() {
             Some(handle) => handle
                 .join()
-                .map_err(|_| obfstr::obfstr!("the pipeline thread panicked").to_string())?,
-            None => Err(obfstr::obfstr!("the pipeline thread was already joined").into()),
+                .map_err(|_| crate::obfstr_err!("the pipeline thread panicked").to_string())?,
+            None => Err(crate::obfstr_err!("the pipeline thread was already joined").into()),
         }
     }
 }

@@ -395,7 +395,7 @@ impl Consumer for OverlayWriter {
 pub fn frame_hash(frame: &Mat) -> Result<String, String> {
     let bytes = frame
         .data_bytes()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("frame is not contiguous: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("frame is not contiguous: ")))?;
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     Ok(format!("{:x}", hasher.finalize()))

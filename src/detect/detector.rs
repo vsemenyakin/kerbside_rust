@@ -88,7 +88,7 @@ pub fn preprocess(working: &Mat, height: i32, width: i32) -> Result<Array4<f32>,
 
     let bytes = rgb
         .data_bytes()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("the model input is not contiguous: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("the model input is not contiguous: ")))?;
     let (h, w) = (height as usize, width as usize);
     let mut tensor = Array4::<f32>::zeros((1, 3, h, w));
     for y in 0..h {
@@ -135,11 +135,11 @@ fn locate_model(file: &str) -> Result<PathBuf, String> {
         .join("\n  ");
     Err(format!(
         "{file}{}{looked}{}{file}{}",
-        obfstr::obfstr!(" was not found. Looked in:\n  "),
-        obfstr::obfstr!("\nSet KERBSIDE_MODEL_DIR, or build it in the Python repository \
+        crate::obfstr_err!(" was not found. Looked in:\n  "),
+        crate::obfstr_err!("\nSet KERBSIDE_MODEL_DIR, or build it in the Python repository \
                          with:\n    venv/bin/python tools/export_model.py\nand copy \
                          kerbside/detect/"),
-        obfstr::obfstr!(" into this project's model/ directory."),
+        crate::obfstr_err!(" into this project's model/ directory."),
     ))
 }
 
@@ -225,17 +225,17 @@ fn try_init_runtime() -> Result<(), String> {
         })
         .is_ok()
     {
-        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY}{}", obfstr::obfstr!(" (system library path)")));
+        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY}{}", crate::obfstr_err!(" (system library path)")));
         return Ok(());
     }
 
     // The remedy depends on the platform, so do not print the other one's.
     let remedy = if cfg!(target_os = "windows") {
-        obfstr::obfstr!("Rebuild with the environment script, which copies it next to the binary:\n\
+        crate::obfstr_err!("Rebuild with the environment script, which copies it next to the binary:\n\
          \x20   . .\\scripts\\env-windows.ps1\n\x20   cargo build --release\n\
          Or set ORT_DYLIB_PATH to an ONNX Runtime 1.26 build.").to_string()
     } else {
-        obfstr::obfstr!("Fetch the runtime for this architecture and point at it, for example:\n\
+        crate::obfstr_err!("Fetch the runtime for this architecture and point at it, for example:\n\
          \x20   curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz\n\
          \x20   tar xf ort.tgz\n\
          \x20   export ORT_DYLIB_PATH=\"$PWD/onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so\"\n\
@@ -248,9 +248,9 @@ fn try_init_runtime() -> Result<(), String> {
         .join("\n  ");
     Err(format!(
         "{RUNTIME_LIBRARY}{}{looked}{}{remedy}{}",
-        obfstr::obfstr!(" was not found. Looked in:\n  "),
-        obfstr::obfstr!("\n  and on the system library search path.\n"),
-        obfstr::obfstr!("\nSee BUILD.md."),
+        crate::obfstr_err!(" was not found. Looked in:\n  "),
+        crate::obfstr_err!("\n  and on the system library search path.\n"),
+        crate::obfstr_err!("\nSee BUILD.md."),
     ))
 }
 
@@ -340,9 +340,9 @@ impl Detector {
         let (tx, rx) = mpsc::channel();
         self.jobs
             .as_ref()
-            .ok_or_else(|| obfstr::obfstr!("the detector has been shut down").to_string())?
+            .ok_or_else(|| crate::obfstr_err!("the detector has been shut down").to_string())?
             .send((working, tx))
-            .map_err(|_| obfstr::obfstr!("the detector thread has stopped").to_string())?;
+            .map_err(|_| crate::obfstr_err!("the detector thread has stopped").to_string())?;
         Ok(rx)
     }
 
@@ -372,7 +372,7 @@ fn run_once(
     let input = Tensor::from_array(tensor).map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot build the input: ")))?;
     let outputs = session
         .run(ort::inputs!["input" => input])
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("inference failed: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("inference failed: ")))?;
     let infer_ms = began.elapsed().as_secs_f64() * 1000.0;
 
     let view = outputs["likelihood"]
@@ -380,12 +380,12 @@ fn run_once(
         .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot read the likelihood map: ")))?;
     let shape = view.shape().to_vec();
     if shape.len() != 4 {
-        return Err(format!("{}{shape:?}", obfstr::obfstr!("expected a 4-D likelihood map, got shape ")));
+        return Err(format!("{}{shape:?}", crate::obfstr_err!("expected a 4-D likelihood map, got shape ")));
     }
     // `likelihood[0, 0]` -- one image, one channel.
     let grid = view
         .into_dimensionality::<ndarray::Ix4>()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("unexpected likelihood shape: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("unexpected likelihood shape: ")))?;
     let map = grid.slice(ndarray::s![0, 0, .., ..]).to_owned();
     Ok(Inference {
         likelihood: map,

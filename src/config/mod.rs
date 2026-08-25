@@ -516,7 +516,7 @@ fn apply_profile(settings: &mut Settings, name: &str) -> Result<(), String> {
             "{}{name:?}{}{}",
             crate::obfstr_err!("unknown profile "),
             crate::obfstr_err!("; known: "),
-            obfstr::obfstr!("[\"bench\", \"replay\", \"test\"]")
+            crate::obfstr_err!("[\"bench\", \"replay\", \"test\"]")
         ));
     }
     Ok(())
@@ -611,7 +611,7 @@ pub fn resolve_settings(
 /// guarantee spelled out.
 static CURRENT: LazyLock<ArcSwap<Settings>> = LazyLock::new(|| {
     ArcSwap::from_pointee(
-        resolve(None, Vec::new(), false).expect(obfstr::obfstr!("the declared defaults must resolve")),
+        resolve(None, Vec::new(), false).expect(crate::obfstr_err!("the declared defaults must resolve")),
     )
 });
 

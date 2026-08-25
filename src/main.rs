@@ -450,20 +450,20 @@ fn run_realtime(
 /// thread, at a point the program chooses, in bounded time. That is the whole
 /// finding, so it is stated rather than silently omitted.
 fn report_gc() {
-    println!("{}", obfstr::obfstr!("gc: no tracing collector in this build"));
+    println!("{}", kerbside::obfstr_err!("gc: no tracing collector in this build"));
     println!(
         "{}",
-        obfstr::obfstr!("  the evidence record and the ring allocate exactly as the Python's do; \
+        kerbside::obfstr_err!("  the evidence record and the ring allocate exactly as the Python's do; \
          what is gone is the collection pass over them")
     );
     let counters = perf::counters();
     println!(
         "{}{:.3}{}{}{}",
-        obfstr::obfstr!("  worst frame "),
+        kerbside::obfstr_err!("  worst frame "),
         counters.max_ms(),
-        obfstr::obfstr!(" ms over "),
+        kerbside::obfstr_err!(" ms over "),
         counters.frames.load(Ordering::Relaxed),
-        obfstr::obfstr!(" frames -- compare against the Python's gen2 pause distribution")
+        kerbside::obfstr_err!(" frames -- compare against the Python's gen2 pause distribution")
     );
 }
 

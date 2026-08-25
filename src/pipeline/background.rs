@@ -118,7 +118,7 @@ impl BackgroundModel {
             &mut mask,
             self.learning_rate,
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("the background model failed: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("the background model failed: ")))?;
         pf.end(crate::perf::stage::BG);
 
         pf.start(crate::perf::stage::MORPH);
