@@ -80,11 +80,11 @@ pub fn preprocess(working: &Mat, height: i32, width: i32) -> Result<Array4<f32>,
         0.0,
         opencv::imgproc::INTER_AREA,
     )
-    .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot resize for the model: ")))?;
+    .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot resize for the model: ")))?;
 
     let mut rgb = Mat::default();
     opencv::imgproc::cvt_color_def(&resized, &mut rgb, opencv::imgproc::COLOR_BGR2RGB)
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot convert to RGB: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot convert to RGB: ")))?;
 
     let bytes = rgb
         .data_bytes()
@@ -275,17 +275,17 @@ impl Detector {
         // would preempt the pipeline thread running the background model, which
         // is the very work this call is supposed to be hiding behind.
         let session = Session::builder()
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot configure ONNX Runtime: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot configure ONNX Runtime: ")))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set the optimisation level: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot set the optimisation level: ")))?
             .with_intra_threads(mdl.ORT_INTRA_THREADS as usize)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set intra-op threads: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot set intra-op threads: ")))?
             .with_inter_threads(mdl.ORT_INTER_THREADS as usize)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set inter-op threads: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot set inter-op threads: ")))?
             .with_parallel_execution(false)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot select sequential execution: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot select sequential execution: ")))?
             .commit_from_file(&path)
-            .map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot load "), path.display()))?;
+            .map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot load "), path.display()))?;
 
         let (tx, rx) = mpsc::channel::<Job>();
         let height = mdl.INPUT_HEIGHT;
@@ -305,7 +305,7 @@ impl Detector {
                     let _ = reply.send(outcome);
                 }
             })
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the detector thread: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot start the detector thread: ")))?;
 
         // The input geometry is captured by the worker closure above, not kept
         // here: only the worker ever needs it, and a second copy on this struct
@@ -369,7 +369,7 @@ fn run_once(
 ) -> Result<Inference, String> {
     let tensor = preprocess(working, height, width)?;
     let began = Instant::now();
-    let input = Tensor::from_array(tensor).map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot build the input: ")))?;
+    let input = Tensor::from_array(tensor).map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot build the input: ")))?;
     let outputs = session
         .run(ort::inputs!["input" => input])
         .map_err(|e| format!("{}{e}", obfstr::obfstr!("inference failed: ")))?;
@@ -377,7 +377,7 @@ fn run_once(
 
     let view = outputs["likelihood"]
         .try_extract_array::<f32>()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot read the likelihood map: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot read the likelihood map: ")))?;
     let shape = view.shape().to_vec();
     if shape.len() != 4 {
         return Err(format!("{}{shape:?}", obfstr::obfstr!("expected a 4-D likelihood map, got shape ")));

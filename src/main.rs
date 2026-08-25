@@ -37,6 +37,12 @@ use kerbside::source::RoadScene;
 
 // Was `const USAGE: &str`; a const cannot hold an obfstr! value (it decodes at
 // run time), so this is a function and the help text ships only as ciphertext.
+//
+// The whole help text is `introspection`-gated: a dist build has no `--help`
+// and no unknown-argument hint, so this large descriptive string is not linked
+// at all. The CLI x-ray the reverse-engineering reports built came straight from
+// running `--help`.
+#[cfg(feature = "introspection")]
 fn usage() -> String {
     obfstr::obfstr!("\
 kerbside -- a roadside speed-enforcement camera
@@ -73,7 +79,22 @@ struct Args {
     gc_stats: bool,
     threaded: bool,
     dump_settings: bool,
+    // Only read by the introspection-gated `--version` handler; in a dist build
+    // the flag does not exist and the field is never read.
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
     version: bool,
+}
+
+/// The unknown-argument error. In dev/release it names the argument and prints
+/// the help; a dist build has neither the help nor the message, so it returns an
+/// empty error -- the process still exits non-zero, saying nothing.
+#[cfg(feature = "introspection")]
+fn unknown_arg(a: &str) -> String {
+    format!("{}{a}\n\n{}", obfstr::obfstr!("unknown argument: "), usage())
+}
+#[cfg(not(feature = "introspection"))]
+fn unknown_arg(_a: &str) -> String {
+    String::new()
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -83,11 +104,13 @@ fn parse_args() -> Result<Args, String> {
     };
     let mut argv = std::env::args().skip(1);
     while let Some(arg) = argv.next() {
-        let mut value = || argv.next().ok_or_else(|| format!("{arg}{}", obfstr::obfstr!(" expects a value")));
+        let mut value = || argv.next().ok_or_else(|| format!("{arg}{}", kerbside::obfstr_err!(" expects a value")));
         // if/else with obfstr comparisons rather than a `match` on literals:
         // a match pattern must be a plain literal, so its text would ship in
         // .rodata; comparing against an obfstr! value keeps the flag names out.
         let a = arg.as_str();
+        let mut handled = true;
+        // Core flags -- everything the oracle path needs. Always present.
         if a == obfstr::obfstr!("--replay") {
             args.replay = true;
         } else if a == obfstr::obfstr!("--realtime") {
@@ -95,36 +118,50 @@ fn parse_args() -> Result<Args, String> {
         } else if a == obfstr::obfstr!("--profile") {
             args.profile = Some(value()?);
         } else if a == obfstr::obfstr!("--frames") {
-            args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--frames: ")))?);
+            args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--frames: ")))?);
         } else if a == obfstr::obfstr!("--seed") {
-            args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--seed: ")))?);
+            args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--seed: ")))?);
         } else if a == obfstr::obfstr!("--limit") {
-            args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--limit: ")))?);
+            args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--limit: ")))?);
         } else if a == obfstr::obfstr!("--out") {
             args.out = value()?;
-        } else if a == obfstr::obfstr!("--overlay") {
-            args.overlay = Some(value()?);
-        } else if a == obfstr::obfstr!("--perf") {
-            args.perf = true;
-        } else if a == obfstr::obfstr!("--perf-dir") {
-            args.perf_dir = Some(value()?);
-        } else if a == obfstr::obfstr!("--gc-stats") {
-            args.gc_stats = true;
-        } else if a == obfstr::obfstr!("--threaded") {
-            args.threaded = true;
-        } else if a == obfstr::obfstr!("--dump-settings") {
-            args.dump_settings = true;
-        } else if a == obfstr::obfstr!("--version") || a == obfstr::obfstr!("-V") {
-            args.version = true;
-        } else if a == obfstr::obfstr!("-h") || a == obfstr::obfstr!("--help") {
-            println!("{}", usage());
-            std::process::exit(0);
         } else {
-            return Err(format!("{}{a}\n\n{}", obfstr::obfstr!("unknown argument: "), usage()));
+            handled = false;
+        }
+        // Diagnostic / introspection flags. A dist build drops this whole block,
+        // so their names, the help text and the version text never enter the
+        // shipped binary; none is needed to run the oracle. In dist an unknown
+        // flag falls through to the (silent) unknown-argument path below.
+        #[cfg(feature = "introspection")]
+        if !handled {
+            handled = true;
+            if a == obfstr::obfstr!("--overlay") {
+                args.overlay = Some(value()?);
+            } else if a == obfstr::obfstr!("--perf") {
+                args.perf = true;
+            } else if a == obfstr::obfstr!("--perf-dir") {
+                args.perf_dir = Some(value()?);
+            } else if a == obfstr::obfstr!("--gc-stats") {
+                args.gc_stats = true;
+            } else if a == obfstr::obfstr!("--threaded") {
+                args.threaded = true;
+            } else if a == obfstr::obfstr!("--dump-settings") {
+                args.dump_settings = true;
+            } else if a == obfstr::obfstr!("--version") || a == obfstr::obfstr!("-V") {
+                args.version = true;
+            } else if a == obfstr::obfstr!("-h") || a == obfstr::obfstr!("--help") {
+                println!("{}", usage());
+                std::process::exit(0);
+            } else {
+                handled = false;
+            }
+        }
+        if !handled {
+            return Err(unknown_arg(a));
         }
     }
     if args.replay && args.realtime {
-        return Err(obfstr::obfstr!("--replay and --realtime are mutually exclusive").into());
+        return Err(kerbside::obfstr_err!("--replay and --realtime are mutually exclusive").into());
     }
     Ok(args)
 }
@@ -136,7 +173,7 @@ fn parse_args() -> Result<Args, String> {
 /// machines incomparable, which defeats the purpose of this program.
 fn pin_runtime(settings: &Settings) -> Result<(), String> {
     opencv::core::set_num_threads(settings.telemetry.OPENCV_THREADS)
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot pin the OpenCV thread pool: ")))
+        .map_err(|e| format!("{}{e}", kerbside::obfstr_err!("cannot pin the OpenCV thread pool: ")))
 }
 
 /// Timestamps come from the frame index, not the clock.
@@ -160,6 +197,12 @@ fn frame_for(scene: &RoadScene, settings: &Settings, frame_id: i64) -> Result<Ra
 /// them. This is the equivalent, and it reports the *resolved* ONNX Runtime
 /// path rather than a version string: the crate exposes no version accessor,
 /// and which file was loaded is the thing that actually decides the numbers.
+///
+/// `introspection`-gated: `--version` is a diagnostic flag a dist build drops,
+/// so none of this text (build profile, library banners, the resolved runtime
+/// path) is linked into the shipped binary. The reports used `--version` to
+/// fingerprint the build.
+#[cfg(feature = "introspection")]
 fn print_version() {
     println!("{}{} ({})", obfstr::obfstr!("kerbside "), env!("CARGO_PKG_VERSION"), build_profile());
     match opencv::core::get_version_string() {
@@ -176,6 +219,7 @@ fn print_version() {
     }
 }
 
+#[cfg(feature = "introspection")]
 fn build_profile() -> String {
     // A debug build is several times slower and must never be benchmarked; the
     // bench scripts refuse to record one, and this is how they can tell.
@@ -189,6 +233,9 @@ fn build_profile() -> String {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
+    // `--version` only exists in an introspection build; in dist `args.version`
+    // is never set and this whole block is compiled out with `print_version`.
+    #[cfg(feature = "introspection")]
     if args.version {
         print_version();
         return Ok(());
@@ -231,7 +278,7 @@ fn run() -> Result<(), String> {
         }
         #[cfg(not(feature = "introspection"))]
         {
-            return Err(obfstr::obfstr!("--dump-settings is unavailable in this build: it was \
+            return Err(kerbside::obfstr_err!("--dump-settings is unavailable in this build: it was \
                         compiled without the introspection feature, which is what \
                         keeps the settings field names out of the binary")
                 .into());
@@ -272,7 +319,7 @@ fn run() -> Result<(), String> {
     // and without this it would accept `--overlay` and silently write no file.
     #[cfg(not(feature = "overlay"))]
     if args.overlay.is_some() {
-        return Err(obfstr::obfstr!("--overlay is unavailable in this build: it was compiled \
+        return Err(kerbside::obfstr_err!("--overlay is unavailable in this build: it was compiled \
                     without the overlay feature (opencv videoio/imgcodecs). The dist build drops \
                     it so the video backend is not linked; use a release build to record an overlay")
             .into());
@@ -483,7 +530,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("{}{message}", obfstr::obfstr!("kerbside: "));
+            eprintln!("{}{message}", kerbside::obfstr_err!("kerbside: "));
             ExitCode::FAILURE
         }
     }

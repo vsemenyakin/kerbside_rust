@@ -118,6 +118,35 @@ mod keying {
 
 // -- macros -----------------------------------------------------------------
 
+/// An `obfstr!` for diagnostic strings that a `dist` build drops entirely.
+///
+/// A successful `--replay` run (the oracle) never reaches an error message, so
+/// error/usage/version text is pure attack surface: string analysis and live
+/// memory scans of the reverse-engineering reports leaned on exactly these. In
+/// dev/release (`introspection` on) this is `obfstr!`, so messages still help;
+/// in a `dist` build (`introspection` off, like the settings-name table) it
+/// expands to an **empty `&str`**, so the literal never enters the binary at all.
+///
+/// Only for text absent from the oracle's output. Strings that reach the CSV
+/// (the gate `reason` labels), the result summary, or the header must stay
+/// `obfstr!` -- blanking them would move the digest.
+#[cfg(feature = "introspection")]
+#[macro_export]
+macro_rules! obfstr_err {
+    ($s:literal) => {
+        ::obfstr::obfstr!($s)
+    };
+}
+
+/// `dist` variant: the message is compiled out to an empty string.
+#[cfg(not(feature = "introspection"))]
+#[macro_export]
+macro_rules! obfstr_err {
+    ($s:literal) => {
+        ""
+    };
+}
+
 /// Encrypt an `f64` literal at compile time; decode it **inline** at run time.
 ///
 /// `encf!(1.35)` reads as the value in source but ships only ciphertext. The

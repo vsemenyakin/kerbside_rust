@@ -396,7 +396,7 @@ impl RunningPipeline {
                     }
                 }
             })
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the pipeline thread: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot start the pipeline thread: ")))?;
         Ok(Self {
             mailbox,
             progress,

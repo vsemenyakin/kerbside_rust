@@ -514,8 +514,8 @@ fn apply_profile(settings: &mut Settings, name: &str) -> Result<(), String> {
     } else {
         return Err(format!(
             "{}{name:?}{}{}",
-            obfstr::obfstr!("unknown profile "),
-            obfstr::obfstr!("; known: "),
+            crate::obfstr_err!("unknown profile "),
+            crate::obfstr_err!("; known: "),
             obfstr::obfstr!("[\"bench\", \"replay\", \"test\"]")
         ));
     }

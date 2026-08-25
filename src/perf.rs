@@ -331,7 +331,7 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     if !enabled {
         return Ok(());
     }
-    fs::create_dir_all(directory).map_err(|e| format!("{}{directory:?}: {e}", obfstr::obfstr!("cannot create ")))?;
+    fs::create_dir_all(directory).map_err(|e| format!("{}{directory:?}: {e}", crate::obfstr_err!("cannot create ")))?;
     let path = Path::new(directory).join(format!("{}{run_name}{}", obfstr::obfstr!("perf_"), obfstr::obfstr!(".csv")));
 
     // Leaked deliberately: the writer outlives every frame and is reachable
@@ -345,11 +345,11 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     }));
 
     let mut file = BufWriter::new(
-        File::create(&path).map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot open "), path.display()))?,
+        File::create(&path).map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot open "), path.display()))?,
     );
     writeln!(file, "frame_id,{}", stage_names().as_slice().join(","))
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot write the perf header: ")))?;
-    file.flush().map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot flush "), path.display()))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write the perf header: ")))?;
+    file.flush().map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot flush "), path.display()))?;
 
     let handle = std::thread::Builder::new()
         .name(obfstr::obfstr!("perf-writer").into())
@@ -370,7 +370,7 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
                 }
             }
         })
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the perf writer thread: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot start the perf writer thread: ")))?;
 
     *writer.handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
     let _ = WRITER.set(writer);
