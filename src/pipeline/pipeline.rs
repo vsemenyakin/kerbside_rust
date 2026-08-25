@@ -374,7 +374,7 @@ impl RunningPipeline {
         let mailbox = pipeline.mailbox();
         let progress = pipeline.progress();
         let handle = std::thread::Builder::new()
-            .name(obfstr::obfstr!("pipeline").into())
+            .name(crate::obfstr_err!("pipeline").into())
             .spawn(move || -> Result<Pipeline, String> {
                 let mut pipeline = pipeline;
                 let mailbox = pipeline.mailbox();

@@ -169,23 +169,23 @@ impl Counters {
     pub fn summary(&self) -> String {
         let frames = self.frames.load(Ordering::Relaxed);
         if frames == 0 {
-            return obfstr::obfstr!("perf: no frames").to_string();
+            return crate::obfstr_err!("perf: no frames").to_string();
         }
         let mean = self.total_ms() / frames as f64;
         let over = self.over_budget.load(Ordering::Relaxed);
         let pct = 100.0 * over as f64 / frames as f64;
         format!(
             "{}{frames}{}{mean:.2}{}{:.2}{}{over} ({pct:.2}%){}{}{}{}{}{}",
-            obfstr::obfstr!("perf: "),
-            obfstr::obfstr!(" frames  mean "),
-            obfstr::obfstr!(" ms  max "),
+            crate::obfstr_err!("perf: "),
+            crate::obfstr_err!(" frames  mean "),
+            crate::obfstr_err!(" ms  max "),
             self.max_ms(),
-            obfstr::obfstr!(" ms  over-budget "),
-            obfstr::obfstr!("  dropped "),
+            crate::obfstr_err!(" ms  over-budget "),
+            crate::obfstr_err!("  dropped "),
             self.dropped.load(Ordering::Relaxed),
-            obfstr::obfstr!("  inferences "),
+            crate::obfstr_err!("  inferences "),
             self.inferences.load(Ordering::Relaxed),
-            obfstr::obfstr!("  violations "),
+            crate::obfstr_err!("  violations "),
             self.violations.load(Ordering::Relaxed),
         )
     }

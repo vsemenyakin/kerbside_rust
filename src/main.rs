@@ -295,9 +295,9 @@ fn run() -> Result<(), String> {
     // Bound to an owned String: an obfstr! result borrows a stack temporary that
     // is dropped at the end of its `{ }` arm, so it cannot be passed inline.
     let run_name = if realtime {
-        obfstr::obfstr!("realtime").to_string()
+        kerbside::obfstr_err!("realtime").to_string()
     } else {
-        obfstr::obfstr!("replay").to_string()
+        kerbside::obfstr_err!("replay").to_string()
     };
     perf::configure(
         settings.telemetry.MEASURE_STAGES,
@@ -371,9 +371,17 @@ fn run() -> Result<(), String> {
         None => (args.out.clone(), 0, 0, String::new()),
     };
 
-    println!("{}", perf::shutdown());
-    println!("{}{wall:.2}{}{:.1}{}", obfstr::obfstr!("wall "), obfstr::obfstr!(" s  ("), total as f64 / wall, obfstr::obfstr!(" fps effective)"));
-    println!("{}{path}{}{rows}{}{violations}", obfstr::obfstr!("results "), obfstr::obfstr!("  rows "), obfstr::obfstr!("  violations "));
+    // The perf writer thread is stopped here regardless; only the *printing* of
+    // the diagnostic summary is introspection-gated. A dist build emits exactly
+    // one line -- the sha256 fingerprint -- and no diagnostics at all: not the
+    // labels, and not the orphaned numbers a bare string-cut would leave behind.
+    let perf_summary = perf::shutdown();
+    #[cfg(feature = "introspection")]
+    {
+        println!("{perf_summary}");
+        println!("{}{wall:.2}{}{:.1}{}", obfstr::obfstr!("wall "), obfstr::obfstr!(" s  ("), total as f64 / wall, obfstr::obfstr!(" fps effective)"));
+        println!("{}{path}{}{rows}{}{violations}", obfstr::obfstr!("results "), obfstr::obfstr!("  rows "), obfstr::obfstr!("  violations "));
+    }
     println!("{}{digest}", obfstr::obfstr!("sha256 "));
     // Deliberately *not* called "tracked containers" like the Python's line.
     // The Python counts GC-tracked dicts, lists and tuples because those are
@@ -383,6 +391,7 @@ fn run() -> Result<(), String> {
     // printing them under the same label would invite a comparison that means
     // nothing. What is comparable is the frame count and the fact that both
     // hold the frames by reference.
+    #[cfg(feature = "introspection")]
     println!(
         "{}{ring_frames}{}{}{}",
         obfstr::obfstr!("ring retains "),
@@ -390,6 +399,8 @@ fn run() -> Result<(), String> {
         thousands(ring_containers as u64),
         obfstr::obfstr!(" retained allocations")
     );
+    #[cfg(not(feature = "introspection"))]
+    let _ = (&perf_summary, &path, rows, violations, wall, ring_frames, ring_containers);
     if args.gc_stats {
         report_gc();
     }

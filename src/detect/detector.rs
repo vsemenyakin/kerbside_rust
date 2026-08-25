@@ -295,7 +295,7 @@ impl Detector {
         // Python, where any thread could in principle call `session.run`, and it
         // is free: only one thread ever needed it.
         let worker = std::thread::Builder::new()
-            .name(obfstr::obfstr!("detector").into())
+            .name(crate::obfstr_err!("detector").into())
             .spawn(move || {
                 let mut session = session;
                 while let Ok((frame, reply)) = rx.recv() {
