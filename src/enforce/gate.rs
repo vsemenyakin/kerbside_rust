@@ -49,31 +49,23 @@ pub struct Verdict {
 }
 
 impl Verdict {
-    /// Why there was no violation. Empty string when there was one.
+    /// The rejection reason as a numeric **code**, not a label. Empty string when
+    /// there was a violation.
+    ///
+    /// The descriptive strings ("baseline too short", ...) used to live here as
+    /// `obfstr!` ciphertext -- the last strings a reverse engineer could pull out
+    /// of the running process (round 7 read them straight from live memory). They
+    /// are gone: the CSV carries the code, and the code->meaning legend lives
+    /// outside the binary. The Python original emits the identical codes in the
+    /// identical order, so `compare_runs` still matches the `reason` column
+    /// exactly. Returns a `&'static str` literal (no per-frame allocation), so the
+    /// churn profile the tests pin does not move.
+    ///   "" = violation; "0".."8" = the nine outcomes, in gate order.
     pub fn reason(&self) -> &'static str {
         if self.violation {
             return "";
         }
-        // The labels are decoded once into 'static storage: the ciphertext,
-        // not the plaintext, is what ships in .rodata, while `reason` still
-        // returns a `&'static str` that the evidence record stores by reference
-        // -- so the per-frame allocation profile the churn tests pin does not
-        // change, and the decoded bytes are identical (the result CSV, and thus
-        // the oracle, does not move).
-        static LABELS: std::sync::OnceLock<[String; 9]> = std::sync::OnceLock::new();
-        let labels = LABELS.get_or_init(|| {
-            [
-                obfstr::obfstr!("outside zone").to_string(),
-                obfstr::obfstr!("unconfirmed").to_string(),
-                obfstr::obfstr!("too few samples").to_string(),
-                obfstr::obfstr!("baseline too short").to_string(),
-                obfstr::obfstr!("poor fit").to_string(),
-                obfstr::obfstr!("low confidence").to_string(),
-                obfstr::obfstr!("within limit").to_string(),
-                obfstr::obfstr!("unstable").to_string(),
-                obfstr::obfstr!("unknown").to_string(),
-            ]
-        });
+        const CODES: [&str; 9] = ["0", "1", "2", "3", "4", "5", "6", "7", "8"];
         for (i, ok) in [
             self.in_zone,
             self.confirmed,
@@ -88,10 +80,10 @@ impl Verdict {
         .enumerate()
         {
             if !ok {
-                return labels[i].as_str();
+                return CODES[i];
             }
         }
-        labels[8].as_str()
+        CODES[8]
     }
 }
 
