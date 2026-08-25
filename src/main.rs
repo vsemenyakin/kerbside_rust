@@ -98,8 +98,14 @@ fn unknown_arg(_a: &str) -> String {
 }
 
 fn parse_args() -> Result<Args, String> {
+    // A dist build writes no CSV, so it needs no default path and `--out` is not
+    // accepted -- the string, and the flag, are absent from the shipped binary.
+    #[cfg(feature = "introspection")]
+    let default_out = obfstr::obfstr!("telemetry/results.csv").to_string();
+    #[cfg(not(feature = "introspection"))]
+    let default_out = String::new();
     let mut args = Args {
-        out: obfstr::obfstr!("telemetry/results.csv").to_string(),
+        out: default_out,
         ..Default::default()
     };
     let mut argv = std::env::args().skip(1);
@@ -123,8 +129,6 @@ fn parse_args() -> Result<Args, String> {
             args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--seed: ")))?);
         } else if a == obfstr::obfstr!("--limit") {
             args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--limit: ")))?);
-        } else if a == obfstr::obfstr!("--out") {
-            args.out = value()?;
         } else {
             handled = false;
         }
@@ -135,7 +139,9 @@ fn parse_args() -> Result<Args, String> {
         #[cfg(feature = "introspection")]
         if !handled {
             handled = true;
-            if a == obfstr::obfstr!("--overlay") {
+            if a == obfstr::obfstr!("--out") {
+                args.out = value()?;
+            } else if a == obfstr::obfstr!("--overlay") {
                 args.overlay = Some(value()?);
             } else if a == obfstr::obfstr!("--perf") {
                 args.perf = true;

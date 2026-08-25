@@ -259,7 +259,7 @@ echo
 # (including `--version`) down to the oracle path, so the smoke test must use a
 # flag that survives. One frame still loads OpenCV and onnxruntime, which is what
 # this check is really about.
-if "$BINARY" --replay --frames 1 --out /tmp/kerbside_smoke.csv >/dev/null 2>&1; then
+if "$BINARY" --replay --frames 1 >/dev/null 2>&1; then
     echo
     echo "Built $BINARY"
 else

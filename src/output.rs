@@ -45,6 +45,12 @@ use crate::track::types::VehicleState;
 
 /// Columns of the result CSV, in order. One row per frame, describing the
 /// vehicle furthest through the measurement zone -- the one about to be judged.
+///
+/// `introspection`-gated: these header names describe every stage's output field
+/// (`lead_residual_m`, `lead_coverage`, ...) and would hand a reverse-engineer
+/// the pipeline's semantics for free. A dist build writes no CSV, so the header
+/// is never emitted and this table is not compiled in.
+#[cfg(feature = "introspection")]
 pub const COLUMNS: [&str; 20] = [
     "frame_id",
     "n_blobs",
@@ -141,21 +147,33 @@ pub struct ResultWriter {
 impl ResultWriter {
     pub fn new(path: &str) -> Result<Self, String> {
         let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot create "), parent.display()))?;
+        // A dist build never opens the file. It computes the digest in memory and
+        // reports only the sha256, so neither the per-frame values (the behavioural
+        // channel a reverse-engineer bracketed thresholds from) nor the CSV header
+        // -- which would name every stage's output field -- ever touches the disk.
+        // The oracle for dist is the fingerprint, not the file. See `COLUMNS`,
+        // which is compiled out with the header write.
+        #[cfg(feature = "introspection")]
+        let file = {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot create "), parent.display()))?;
+                }
             }
-        }
-        let mut file = BufWriter::new(
-            File::create(&path).map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot open "), path.display()))?,
-        );
-        // CRLF, because `csv.writer` uses it on every platform.
-        write!(file, "{}\r\n", COLUMNS.join(","))
-            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write the CSV header: ")))?;
+            let mut file = BufWriter::new(
+                File::create(&path).map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot open "), path.display()))?,
+            );
+            // CRLF, because `csv.writer` uses it on every platform.
+            write!(file, "{}\r\n", COLUMNS.join(","))
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write the CSV header: ")))?;
+            Some(file)
+        };
+        #[cfg(not(feature = "introspection"))]
+        let file = None;
         Ok(Self {
             path,
-            file: Some(file),
+            file,
             digest: Sha256::new(),
             rows: 0,
             violations: 0,

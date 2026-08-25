@@ -347,7 +347,7 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     let mut file = BufWriter::new(
         File::create(&path).map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot open "), path.display()))?,
     );
-    writeln!(file, "frame_id,{}", stage_names().as_slice().join(","))
+    writeln!(file, "{}{}", crate::obfstr_err!("frame_id,"), stage_names().as_slice().join(","))
         .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write the perf header: ")))?;
     file.flush().map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot flush "), path.display()))?;
 
