@@ -516,6 +516,11 @@ fn harden() {
     // an emulator that stubs the probe (or never runs start-up) it comes out
     // wrong, so every `encf!`/`enci!` decodes to garbage. See `crypt::keying`.
     kerbside::crypt::init_keying();
+    // Refuse if a library was preloaded into us. The observed dumps came from an
+    // in-process LD_PRELOAD shim (a memory dumper + a /proc/self/status faker),
+    // which anti-ptrace cannot stop because it never traces. Catch the injection
+    // itself instead. See `detect_injection` for the (honest) limits.
+    detect_injection();
     // PR_SET_DUMPABLE (4) = 0 (SUID_DUMP_DISABLE): drop dumpability so a non-root
     // ptrace/gcore of this process is denied by the kernel.
     extern "C" {
@@ -544,7 +549,112 @@ fn harden() {
             }
         }
     }
+    // Seal our own code last, once every relocation is done. After this the
+    // `.text` pages cannot be made writable, so a software breakpoint (which
+    // rewrites an instruction) cannot be inserted and the code cannot be
+    // detoured -- exactly the step the reverse-engineering report was blocked on.
+    seal_code();
 }
+
+/// Refuse to run under a preloaded library (the round-8 in-process dumper).
+///
+/// Two checks: the `LD_PRELOAD`/`LD_AUDIT` launch environment, and any *executable*
+/// `.so` mapped from outside the system library directories (the shims were loaded
+/// from a home directory). Honest limits: a shim can `unsetenv` before we look,
+/// and can be staged inside `/usr` to pass the map scan -- this catches the
+/// technique that was actually used, it is not a wall. If we exit here we exit
+/// before the scene or the model is built, so a dump taken at exit is empty.
+#[cfg(feature = "anti-tamper")]
+fn detect_injection() {
+    for var in ["LD_PRELOAD", "LD_AUDIT"] {
+        if std::env::var_os(var).is_some_and(|v| !v.is_empty()) {
+            std::process::exit(1);
+        }
+    }
+    if let Ok(maps) = std::fs::read_to_string("/proc/self/maps") {
+        for line in maps.lines() {
+            let mut it = line.split_whitespace();
+            let _range = it.next();
+            let perms = match it.next() {
+                Some(p) => p,
+                None => continue,
+            };
+            if !perms.contains('x') {
+                continue;
+            }
+            let path = match line.split_whitespace().last() {
+                Some(p) => p,
+                None => continue,
+            };
+            if !(path.ends_with(".so") || path.contains(".so.")) {
+                continue;
+            }
+            let base = path.rsplit('/').next().unwrap_or(path);
+            let system = path.starts_with("/usr/")
+                || path.starts_with("/lib/")
+                || path.starts_with("/lib64/")
+                || base.starts_with("libonnxruntime");
+            if !system {
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+/// `mseal(2)` every executable region of this binary, so its `.text` protection
+/// can never be changed again (kernel 6.10+; the Pi runs 6.18). syscall 462 on
+/// the aarch64 generic table; called via `svc` because glibc does not wrap it.
+#[cfg(all(feature = "anti-tamper", target_arch = "aarch64"))]
+fn seal_code() {
+    let exe = match std::fs::read_link("/proc/self/exe")
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_owned))
+    {
+        Some(e) => e,
+        None => return,
+    };
+    let maps = match std::fs::read_to_string("/proc/self/maps") {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    for line in maps.lines() {
+        let mut it = line.split_whitespace();
+        let range = match it.next() {
+            Some(r) => r,
+            None => continue,
+        };
+        let perms = match it.next() {
+            Some(p) => p,
+            None => continue,
+        };
+        if !perms.contains('x') {
+            continue;
+        }
+        if line.split_whitespace().last() != Some(exe.as_str()) {
+            continue;
+        }
+        if let Some((s, e)) = range.split_once('-') {
+            if let (Ok(start), Ok(end)) =
+                (u64::from_str_radix(s, 16), u64::from_str_radix(e, 16))
+            {
+                unsafe {
+                    core::arch::asm!(
+                        "svc #0",
+                        in("x8") 462u64,        // __NR_mseal
+                        in("x0") start,
+                        in("x1") end - start,
+                        in("x2") 0u64,          // flags
+                        lateout("x0") _,
+                        options(nostack),
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "anti-tamper", not(target_arch = "aarch64")))]
+fn seal_code() {}
 
 #[cfg(not(feature = "anti-tamper"))]
 #[inline]
