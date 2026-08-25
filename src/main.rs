@@ -266,6 +266,17 @@ fn run() -> Result<(), String> {
             &build_homography(&settings)?,
         )?));
     }
+    // A build without the `overlay` feature still parses `--overlay` (the flag is
+    // not feature-gated), so refuse it loudly here. The dist build drops overlay
+    // -- videoio/imgcodecs are not linked so the OpenCV video backend is absent --
+    // and without this it would accept `--overlay` and silently write no file.
+    #[cfg(not(feature = "overlay"))]
+    if args.overlay.is_some() {
+        return Err(obfstr::obfstr!("--overlay is unavailable in this build: it was compiled \
+                    without the overlay feature (opencv videoio/imgcodecs). The dist build drops \
+                    it so the video backend is not linked; use a release build to record an overlay")
+            .into());
+    }
 
     let consumers = ConsumerChain::new(&settings, Some(FanOut::new(sinks)));
     let pipeline = Pipeline::new(
