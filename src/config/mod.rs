@@ -490,6 +490,11 @@ pub type Override = Box<dyn Fn(&mut Settings)>;
 /// Apply a named startup profile in place. The typed twin of the Python's
 /// profile table; the values are identical to the ones the reflection path used
 /// to carry as `(name, Value)` pairs.
+///
+/// `introspection`-gated: a dist build drops `--profile`, so the profile
+/// selector strings ("replay"/"bench"/"test") and this table never enter the
+/// shipped binary.
+#[cfg(feature = "introspection")]
 fn apply_profile(settings: &mut Settings, name: &str) -> Result<(), String> {
     // Compared through obfstr, not a plaintext `match`, so the selector strings
     // do not survive in .rodata.
@@ -552,9 +557,14 @@ pub fn resolve(
     headless: bool,
 ) -> Result<Settings, String> {
     let mut settings = Settings::default();
+    // `--profile` exists only in an introspection build; a dist build passes
+    // `None` here and the profile machinery is compiled out.
+    #[cfg(feature = "introspection")]
     if let Some(profile) = profile {
         apply_profile(&mut settings, profile)?;
     }
+    #[cfg(not(feature = "introspection"))]
+    let _ = profile;
     for over in &overrides {
         over(&mut settings);
     }

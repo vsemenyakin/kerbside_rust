@@ -76,6 +76,7 @@ struct Args {
     overlay: Option<String>,
     perf: bool,
     perf_dir: Option<String>,
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
     gc_stats: bool,
     threaded: bool,
     dump_settings: bool,
@@ -119,10 +120,6 @@ fn parse_args() -> Result<Args, String> {
         // Core flags -- everything the oracle path needs. Always present.
         if a == obfstr::obfstr!("--replay") {
             args.replay = true;
-        } else if a == obfstr::obfstr!("--realtime") {
-            args.realtime = true;
-        } else if a == obfstr::obfstr!("--profile") {
-            args.profile = Some(value()?);
         } else if a == obfstr::obfstr!("--frames") {
             args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--frames: ")))?);
         } else if a == obfstr::obfstr!("--seed") {
@@ -139,7 +136,11 @@ fn parse_args() -> Result<Args, String> {
         #[cfg(feature = "introspection")]
         if !handled {
             handled = true;
-            if a == obfstr::obfstr!("--out") {
+            if a == obfstr::obfstr!("--realtime") {
+                args.realtime = true;
+            } else if a == obfstr::obfstr!("--profile") {
+                args.profile = Some(value()?);
+            } else if a == obfstr::obfstr!("--out") {
                 args.out = value()?;
             } else if a == obfstr::obfstr!("--overlay") {
                 args.overlay = Some(value()?);
@@ -401,6 +402,9 @@ fn run() -> Result<(), String> {
     );
     #[cfg(not(feature = "introspection"))]
     let _ = (&perf_summary, &path, rows, violations, wall, ring_frames, ring_containers);
+    // `--gc-stats` exists only in an introspection build, so a dist build never
+    // reaches `report_gc` and it is compiled out with its `println!`s.
+    #[cfg(feature = "introspection")]
     if args.gc_stats {
         report_gc();
     }
@@ -460,6 +464,10 @@ fn run_realtime(
 /// and the ring is released when the ring evicts a frame -- on the pipeline
 /// thread, at a point the program chooses, in bounded time. That is the whole
 /// finding, so it is stated rather than silently omitted.
+///
+/// `introspection`-gated with `--gc-stats`, so a dist build carries neither the
+/// call nor these strings.
+#[cfg(feature = "introspection")]
 fn report_gc() {
     println!("{}", kerbside::obfstr_err!("gc: no tracing collector in this build"));
     println!(
