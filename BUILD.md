@@ -122,7 +122,7 @@ sudo apt install -y build-essential pkg-config libopencv-dev clang libclang-dev 
 
 Note this is lighter than a plugin build: no `cmake`, `ninja`, `libz3-dev` or
 `llvm-*-dev` — those are only needed to *rebuild* the plugin (see "The dist
-profile" → the LLVM-version coupling).
+profile" → the LLVM-version coupling). 
 
 **2. The LLVM 20 runtime** the plugin links (`libLLVM.so.20.1`). Debian's newest
 packaged LLVM is 19, so take the *runtime* package (not `-dev`) from apt.llvm.org:
