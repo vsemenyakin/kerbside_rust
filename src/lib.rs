@@ -28,6 +28,10 @@ pub mod detect;
 pub mod enforce;
 pub mod geometry;
 pub mod measure;
+// The scene generator (numpy-exact RNG). A dist build analyses a recorded clip
+// and never generates, so the generator -- the crown asset that survived every
+// reverse-engineering round -- is not compiled into the shipped binary at all.
+#[cfg(feature = "introspection")]
 pub mod numpy_rng;
 pub mod output;
 pub mod perf;

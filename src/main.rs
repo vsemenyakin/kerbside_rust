@@ -33,6 +33,8 @@ use kerbside::output::OverlayWriter;
 use kerbside::perf;
 use kerbside::pipeline::types::SharedMat;
 use kerbside::pipeline::{live_settings, Pipeline, RawFrame, RunningPipeline};
+use kerbside::source::{ClipSource, FrameSource};
+#[cfg(feature = "introspection")]
 use kerbside::source::RoadScene;
 
 // Was `const USAGE: &str`; a const cannot hold an obfstr! value (it decodes at
@@ -73,6 +75,13 @@ struct Args {
     seed: Option<i64>,
     limit: Option<f64>,
     out: String,
+    // Record the generated scene to a raw clip and exit, or analyse a clip
+    // instead of generating. Both are introspection-only flags today (a dist
+    // build will take the clip path positionally); the fields are unread in dist.
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
+    generate: Option<String>,
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
+    input: Option<String>,
     overlay: Option<String>,
     perf: bool,
     perf_dir: Option<String>,
@@ -86,18 +95,33 @@ struct Args {
     version: bool,
 }
 
-/// The unknown-argument error. In dev/release it names the argument and prints
-/// the help; a dist build has neither the help nor the message, so it returns an
-/// empty error -- the process still exits non-zero, saying nothing.
+/// The unknown-argument error names the argument and prints the help. Only the
+/// introspection CLI uses it; a dist build has a single positional argument.
 #[cfg(feature = "introspection")]
 fn unknown_arg(a: &str) -> String {
     format!("{}{a}\n\n{}", obfstr::obfstr!("unknown argument: "), usage())
 }
+
+/// dist CLI: exactly one positional argument -- the path to the clip to analyse.
+/// No flags, no help, no strings; any deviation exits non-zero, silently.
 #[cfg(not(feature = "introspection"))]
-fn unknown_arg(_a: &str) -> String {
-    String::new()
+fn parse_args() -> Result<Args, String> {
+    let mut argv = std::env::args().skip(1);
+    let path = match argv.next() {
+        Some(p) => p,
+        None => return Err(String::new()),
+    };
+    if argv.next().is_some() {
+        return Err(String::new());
+    }
+    Ok(Args {
+        replay: true,
+        input: Some(path),
+        ..Default::default()
+    })
 }
 
+#[cfg(feature = "introspection")]
 fn parse_args() -> Result<Args, String> {
     // A dist build writes no CSV, so it needs no default path and `--out` is not
     // accepted -- the string, and the flag, are absent from the shipped binary.
@@ -140,6 +164,10 @@ fn parse_args() -> Result<Args, String> {
                 args.realtime = true;
             } else if a == obfstr::obfstr!("--profile") {
                 args.profile = Some(value()?);
+            } else if a == obfstr::obfstr!("--generate") {
+                args.generate = Some(value()?);
+            } else if a == obfstr::obfstr!("--input") {
+                args.input = Some(value()?);
             } else if a == obfstr::obfstr!("--out") {
                 args.out = value()?;
             } else if a == obfstr::obfstr!("--overlay") {
@@ -188,8 +216,12 @@ fn pin_runtime(settings: &Settings) -> Result<(), String> {
 /// A wall-clock timestamp would make the run irreproducible for no benefit --
 /// and would put the measured speed at the mercy of scheduling jitter, which is
 /// not a property anyone wants in a device that issues fines.
-fn frame_for(scene: &RoadScene, settings: &Settings, frame_id: i64) -> Result<RawFrame, String> {
-    let (image, _truth) = scene.render(frame_id)?;
+fn frame_for(
+    source: &dyn FrameSource,
+    settings: &Settings,
+    frame_id: i64,
+) -> Result<RawFrame, String> {
+    let image = source.frame(frame_id)?;
     Ok(RawFrame::new(
         frame_id,
         SharedMat::new(image),
@@ -307,8 +339,36 @@ fn run() -> Result<(), String> {
         &run_name,
     )?;
 
-    let scene = RoadScene::new(&settings)?;
-    let total = i64::min(scene.frame_count(), settings.video.SCENE_FRAMES);
+    // Generate a raw clip and stop, instead of running the pipeline. This is the
+    // dev-side recorder: it renders every frame through the scene and writes the
+    // byte-exact BGR buffers, so a later analysing run (of any build, including a
+    // generator-less dist) reproduces the same output. Introspection only.
+    #[cfg(feature = "introspection")]
+    if let Some(path) = &args.generate {
+        let scene = RoadScene::new(&settings)?;
+        let total = i64::min(scene.frame_count(), settings.video.SCENE_FRAMES);
+        return kerbside::source::write_clip(
+            path,
+            settings.video.FRAME_WIDTH,
+            settings.video.FRAME_HEIGHT,
+            settings.video.FPS,
+            total,
+            |id| scene.render(id).map(|(image, _truth)| image),
+        );
+    }
+
+    // The frame source: a recorded clip if one was given, otherwise the in-code
+    // scene generator. The pipeline is identical either way.
+    let source: Box<dyn FrameSource> = match &args.input {
+        Some(path) => Box::new(ClipSource::open(path)?),
+        // dist always gets a clip path positionally, so this arm is unreachable
+        // there -- and it must not name `RoadScene`, which dist does not compile.
+        #[cfg(feature = "introspection")]
+        None => Box::new(RoadScene::new(&settings)?),
+        #[cfg(not(feature = "introspection"))]
+        None => return Err(String::new()),
+    };
+    let total = i64::min(source.frame_count(), settings.video.SCENE_FRAMES);
 
     let mut sinks: Vec<Box<dyn Consumer + Send>> = Vec::new();
     sinks.push(Box::new(ResultWriter::new(&args.out)?));
@@ -345,13 +405,13 @@ fn run() -> Result<(), String> {
 
     let began = Instant::now();
     let mut pipeline = if realtime {
-        run_realtime(pipeline, &scene, &settings, total)?
+        run_realtime(pipeline, source.as_ref(), &settings, total)?
     } else if args.threaded {
-        run_replay_threaded(pipeline, &scene, &settings, total)?
+        run_replay_threaded(pipeline, source.as_ref(), &settings, total)?
     } else {
         let mut pipeline = pipeline;
         for frame_id in 0..total {
-            pipeline.process_one(frame_for(&scene, &settings, frame_id)?)?;
+            pipeline.process_one(frame_for(source.as_ref(), &settings, frame_id)?)?;
         }
         pipeline
     };
@@ -418,13 +478,13 @@ fn run() -> Result<(), String> {
 /// with it is comparing schedules rather than implementations.
 fn run_replay_threaded(
     pipeline: Pipeline,
-    scene: &RoadScene,
+    source: &dyn FrameSource,
     settings: &Settings,
     total: i64,
 ) -> Result<Pipeline, String> {
     let running = RunningPipeline::start(pipeline)?;
     for frame_id in 0..total {
-        running.mailbox().post(frame_for(scene, settings, frame_id)?);
+        running.mailbox().post(frame_for(source, settings, frame_id)?);
     }
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
@@ -439,7 +499,7 @@ fn run_replay_threaded(
 /// Pace the source at the configured rate; the mailbox drops what it must.
 fn run_realtime(
     pipeline: Pipeline,
-    scene: &RoadScene,
+    source: &dyn FrameSource,
     settings: &Settings,
     total: i64,
 ) -> Result<Pipeline, String> {
@@ -452,7 +512,7 @@ fn run_realtime(
         if target > now {
             std::thread::sleep(target - now);
         }
-        running.mailbox().post(frame_for(scene, settings, frame_id)?);
+        running.mailbox().post(frame_for(source, settings, frame_id)?);
     }
     std::thread::sleep(Duration::from_millis(250));
     running.stop()

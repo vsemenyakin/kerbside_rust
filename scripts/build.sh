@@ -255,11 +255,22 @@ fi
 # library search path. Better to find that out here than in the middle of a
 # benchmark run.
 echo
-# A one-frame replay, not `--version`: the dist build strips the diagnostic CLI
-# (including `--version`) down to the oracle path, so the smoke test must use a
-# flag that survives. One frame still loads OpenCV and onnxruntime, which is what
-# this check is really about.
-if "$BINARY" --replay --frames 1 >/dev/null 2>&1; then
+# The dist build takes a positional clip path and needs a clip to run, so it is
+# smoke-tested by resolving its dynamic libraries (`ldd`): if they all resolve it
+# will load. Every other profile keeps the flag CLI, so a one-frame replay is
+# used there -- it also exercises the OpenCV/onnxruntime load. (libonnxruntime is
+# `dlopen`ed, not an `ldd` entry, so the dist check does not cover it; a missing
+# runtime shows up on the first real analysis run instead.)
+if [[ "$PROFILE" == "dist" ]]; then
+    if ldd "$BINARY" 2>&1 | grep -q "not found"; then
+        echo
+        echo "WARNING: $BINARY was built but has unresolved libraries:" >&2
+        ldd "$BINARY" 2>&1 | grep "not found" >&2
+        exit 1
+    fi
+    echo
+    echo "Built $BINARY"
+elif "$BINARY" --replay --frames 1 >/dev/null 2>&1; then
     echo
     echo "Built $BINARY"
 else
