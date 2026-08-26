@@ -600,9 +600,9 @@ fn harden() {
     }
     // Already traced at start? Refuse -- quietly, with no anti-debug banner to
     // steer around.
-    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+    if let Ok(status) = std::fs::read_to_string(obfstr::obfstr!("/proc/self/status")) {
         for line in status.lines() {
-            if let Some(rest) = line.strip_prefix("TracerPid:") {
+            if let Some(rest) = line.strip_prefix(obfstr::obfstr!("TracerPid:")) {
                 if rest.trim() != "0" {
                     std::process::exit(1);
                 }
@@ -626,12 +626,13 @@ fn harden() {
 /// before the scene or the model is built, so a dump taken at exit is empty.
 #[cfg(feature = "anti-tamper")]
 fn detect_injection() {
-    for var in ["LD_PRELOAD", "LD_AUDIT"] {
-        if std::env::var_os(var).is_some_and(|v| !v.is_empty()) {
-            std::process::exit(1);
-        }
+    let preloaded = std::env::var_os(obfstr::obfstr!("LD_PRELOAD"))
+        .is_some_and(|v| !v.is_empty())
+        || std::env::var_os(obfstr::obfstr!("LD_AUDIT")).is_some_and(|v| !v.is_empty());
+    if preloaded {
+        std::process::exit(1);
     }
-    if let Ok(maps) = std::fs::read_to_string("/proc/self/maps") {
+    if let Ok(maps) = std::fs::read_to_string(obfstr::obfstr!("/proc/self/maps")) {
         for line in maps.lines() {
             let mut it = line.split_whitespace();
             let _range = it.next();
@@ -666,14 +667,14 @@ fn detect_injection() {
 /// the aarch64 generic table; called via `svc` because glibc does not wrap it.
 #[cfg(all(feature = "anti-tamper", target_arch = "aarch64"))]
 fn seal_code() {
-    let exe = match std::fs::read_link("/proc/self/exe")
+    let exe = match std::fs::read_link(obfstr::obfstr!("/proc/self/exe"))
         .ok()
         .and_then(|p| p.to_str().map(str::to_owned))
     {
         Some(e) => e,
         None => return,
     };
-    let maps = match std::fs::read_to_string("/proc/self/maps") {
+    let maps = match std::fs::read_to_string(obfstr::obfstr!("/proc/self/maps")) {
         Ok(m) => m,
         Err(_) => return,
     };

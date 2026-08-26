@@ -84,13 +84,13 @@ pub struct ClipSource {
 
 impl ClipSource {
     pub fn open(path: &str) -> Result<Self, String> {
-        let mut f =
-            File::open(path).map_err(|e| format!("{}{path:?}: {e}", "cannot open the clip: "))?;
+        let mut f = File::open(path)
+            .map_err(|e| format!("{}{path:?}: {e}", crate::obfstr_err!("cannot open the clip: ")))?;
         let mut hdr = [0u8; HEADER_LEN as usize];
         f.read_exact(&mut hdr)
-            .map_err(|e| format!("{}{e}", "cannot read the clip header: "))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot read the clip header: ")))?;
         if &hdr[0..4] != MAGIC {
-            return Err("not a kerbside clip (bad magic)".to_string());
+            return Err(crate::obfstr_err!("not a kerbside clip (bad magic)").to_string());
         }
         let rd_i32 = |o: usize| i32::from_le_bytes(hdr[o..o + 4].try_into().unwrap());
         let width = rd_i32(4);
@@ -98,7 +98,7 @@ impl ClipSource {
         let _fps = rd_i32(12);
         let frames = i64::from_le_bytes(hdr[16..24].try_into().unwrap());
         if width <= 0 || height <= 0 || frames < 0 {
-            return Err("clip header has invalid dimensions".to_string());
+            return Err(crate::obfstr_err!("clip header has invalid dimensions").to_string());
         }
         let frame_bytes = (width as usize) * (height as usize) * 3;
         Ok(Self {
@@ -118,22 +118,26 @@ impl FrameSource for ClipSource {
 
     fn frame(&self, id: i64) -> Result<Mat, String> {
         if id < 0 || id >= self.frames {
-            return Err(format!("clip frame {id} out of range"));
+            return Err(format!(
+                "{}{id}{}",
+                crate::obfstr_err!("clip frame "),
+                crate::obfstr_err!(" out of range")
+            ));
         }
         let offset = HEADER_LEN + (id as u64) * (self.frame_bytes as u64);
         let mut buf = vec![0u8; self.frame_bytes];
         {
             let mut f = self.file.lock().unwrap_or_else(|e| e.into_inner());
             f.seek(SeekFrom::Start(offset))
-                .map_err(|e| format!("{}{e}", "cannot seek the clip: "))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot seek the clip: ")))?;
             f.read_exact(&mut buf)
-                .map_err(|e| format!("{}{e}", "cannot read a clip frame: "))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot read a clip frame: ")))?;
         }
         let mut mat =
             Mat::new_rows_cols_with_default(self.height, self.width, CV_8UC3, Scalar::all(0.0))
-                .map_err(|e| format!("{}{e}", "cannot allocate a clip frame: "))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot allocate a clip frame: ")))?;
         mat.data_bytes_mut()
-            .map_err(|e| format!("{}{e}", "cannot fill a clip frame: "))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot fill a clip frame: ")))?
             .copy_from_slice(&buf);
         Ok(mat)
     }
