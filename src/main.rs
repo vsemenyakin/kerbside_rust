@@ -20,6 +20,8 @@
 //! and a missing flag would look like an oversight rather than a finding.
 
 use std::process::ExitCode;
+// Only the introspection-gated GC/counter report loads a counter.
+#[cfg(feature = "introspection")]
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -68,6 +70,7 @@ kerbside -- a roadside speed-enforcement camera
 
 #[derive(Default)]
 struct Args {
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
     replay: bool,
     realtime: bool,
     profile: Option<String>,
@@ -547,6 +550,8 @@ fn report_gc() {
 }
 
 /// Thousands separators, the way Python's `{:,}` renders them.
+/// Only the introspection-gated ring/GC report calls it.
+#[cfg(feature = "introspection")]
 fn thousands(value: u64) -> String {
     let digits = value.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);

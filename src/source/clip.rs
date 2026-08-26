@@ -14,7 +14,10 @@
 //! the bytes written are the bytes read.
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom};
+// Writing a clip is `write_clip`, which is introspection-only; dist only reads.
+#[cfg(feature = "introspection")]
+use std::io::{BufWriter, Write};
 use std::sync::Mutex;
 
 use opencv::core::{Mat, Scalar, CV_8UC3};

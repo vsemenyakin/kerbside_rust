@@ -28,19 +28,29 @@
 //! its terminator, exactly as the Python does, so the digests are directly
 //! comparable even if a file gets its line endings mangled in transit.
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+// `fs::create_dir_all` is only reached when a CSV is actually written, which a
+// dist build never does.
+#[cfg(feature = "introspection")]
+use std::fs;
 
-use opencv::core::{Mat, Point as CvPoint, Scalar, Size, Vector};
+use opencv::core::Mat;
 use opencv::prelude::*;
 use sha2::{Digest, Sha256};
+// The overlay renderer is the only consumer of these; a dist build ships no
+// overlay, so gate them with it to keep that build warning-clean.
+#[cfg(feature = "overlay")]
+use opencv::core::{Point as CvPoint, Scalar, Size, Vector};
 
-use crate::config::Settings;
 use crate::consumers::{Consumer, FrameOutput, SinkSummary};
 use crate::enforce::Verdict;
+#[cfg(feature = "overlay")]
 use crate::geometry::Homography;
+#[cfg(feature = "overlay")]
+use crate::config::Settings;
 use crate::track::types::VehicleState;
 
 /// Columns of the result CSV, in order. One row per frame, describing the
