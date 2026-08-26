@@ -255,7 +255,11 @@ fi
 # library search path. Better to find that out here than in the middle of a
 # benchmark run.
 echo
-if "$BINARY" --version; then
+# A one-frame replay, not `--version`: the dist build strips the diagnostic CLI
+# (including `--version`) down to the oracle path, so the smoke test must use a
+# flag that survives. One frame still loads OpenCV and onnxruntime, which is what
+# this check is really about.
+if "$BINARY" --replay --frames 1 >/dev/null 2>&1; then
     echo
     echo "Built $BINARY"
 else

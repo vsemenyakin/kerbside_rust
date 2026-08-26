@@ -201,7 +201,7 @@ impl RoadScene {
             // Overcast sky above the horizon, in BGR.
             Scalar::new(128.0, 122.0, 112.0, 0.0),
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot allocate the scene background: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot allocate the scene background: ")))?;
 
         // Ground plane, drawn as one very large quad. The extents are chosen
         // from what is actually in view, not from round numbers: at the near
@@ -222,7 +222,7 @@ impl RoadScene {
         ]);
         // Verge green.
         opencv::imgproc::fill_convex_poly_def(&mut canvas, &ground, Scalar::new(52.0, 74.0, 54.0, 0.0))
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the verge: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the verge: ")))?;
 
         // The carriageway itself, laid over the verge.
         let surface = self.polygon(&[
@@ -232,7 +232,7 @@ impl RoadScene {
             self.project(-0.35, far),
         ]);
         opencv::imgproc::fill_convex_poly_def(&mut canvas, &surface, Scalar::new(58.0, 60.0, 62.0, 0.0))
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the carriageway: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the carriageway: ")))?;
 
         // Asphalt texture, projected so it foreshortens with the surface
         // instead of sitting flat over it.
@@ -245,11 +245,11 @@ impl RoadScene {
         let grain = rng.integers_u8(0, 26, (self.height * self.width) as usize);
         let mut speckle =
             Mat::new_rows_cols_with_default(self.height, self.width, CV_8UC3, Scalar::all(0.0))
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot allocate the asphalt speckle: ")))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot allocate the asphalt speckle: ")))?;
         {
             let bytes = speckle
                 .data_bytes_mut()
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot fill the asphalt speckle: ")))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot fill the asphalt speckle: ")))?;
             for (i, value) in grain.iter().enumerate() {
                 bytes[i * 3] = *value;
                 bytes[i * 3 + 1] = *value;
@@ -261,9 +261,9 @@ impl RoadScene {
         // copy: add everywhere, then keep the result only on the ground.
         let mut mask =
             Mat::new_rows_cols_with_default(self.height, self.width, CV_8UC1, Scalar::all(0.0))
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot allocate the ground mask: ")))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot allocate the ground mask: ")))?;
         opencv::imgproc::fill_convex_poly_def(&mut mask, &ground, Scalar::all(255.0))
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the ground mask: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the ground mask: ")))?;
 
         let mut textured = Mat::default();
         opencv::core::add(
@@ -273,10 +273,10 @@ impl RoadScene {
             &opencv::core::no_array(),
             -1,
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot apply the asphalt texture: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot apply the asphalt texture: ")))?;
         textured
             .copy_to_masked(&mut canvas, &mask)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot mask the asphalt texture: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot mask the asphalt texture: ")))?;
 
         // Lane markings: solid edge lines, dashed centre.
         for across in [0.15, 7.15] {
@@ -317,7 +317,7 @@ impl RoadScene {
                 opencv::imgproc::LINE_8,
                 0,
             )
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a survey mark: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a survey mark: ")))?;
         }
 
         Ok(canvas)
@@ -339,7 +339,7 @@ impl RoadScene {
             self.project(across - half_width_m, y1),
         ]);
         opencv::imgproc::fill_convex_poly_def(canvas, &quad, colour)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a road marking: ")))
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a road marking: ")))
     }
 
     /// Schedule vehicles down both lanes.
@@ -413,9 +413,9 @@ impl RoadScene {
         let values = rng.integers_u8(0, 9, (self.height * self.width * 3) as usize);
         let mut tile =
             Mat::new_rows_cols_with_default(self.height, self.width, CV_8UC3, Scalar::all(0.0))
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot allocate a noise tile: ")))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot allocate a noise tile: ")))?;
         tile.data_bytes_mut()
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot fill a noise tile: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot fill a noise tile: ")))?
             .copy_from_slice(&values);
         Ok(tile)
     }
@@ -502,18 +502,18 @@ impl RoadScene {
                 .collect::<Vec<_>>(),
         );
         opencv::imgproc::fill_convex_poly_def(canvas, &shadow, Scalar::new(38.0, 40.0, 42.0, 0.0))
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a vehicle shadow: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a vehicle shadow: ")))?;
 
         // Sides, then roof, so the roof wins where they overlap.
         for (a, b) in [(0usize, 1usize), (1, 2), (2, 3), (3, 0)] {
             let side = self.polygon(&[footprint[a], footprint[b], roof[b], roof[a]]);
             let colour = if a % 2 == 1 { dark } else { body };
             opencv::imgproc::fill_convex_poly_def(canvas, &side, colour)
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a vehicle side: ")))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a vehicle side: ")))?;
         }
         let roof_poly = self.polygon(&roof);
         opencv::imgproc::fill_convex_poly_def(canvas, &roof_poly, bright)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a vehicle roof: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a vehicle roof: ")))?;
 
         // A windscreen band, so the model sees internal structure rather than a
         // flat slab -- flat slabs merge with each other far too readily.
@@ -524,7 +524,7 @@ impl RoadScene {
             (roof[0].0, roof[0].1 + lift * 0.55),
         ]);
         opencv::imgproc::fill_convex_poly_def(canvas, &band, Scalar::new(28.0, 32.0, 36.0, 0.0))
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a windscreen: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a windscreen: ")))?;
         Ok(())
     }
 
@@ -534,9 +534,9 @@ impl RoadScene {
             let last = self.frames - 1;
             return Err(format!(
                 "{}{frame_id}{}{last}{}",
-                obfstr::obfstr!("frame "),
-                obfstr::obfstr!(" is outside this scene (0.."),
-                obfstr::obfstr!("). The length is video.SCENE_FRAMES; raise it, or ask for fewer."),
+                crate::obfstr_err!("frame "),
+                crate::obfstr_err!(" is outside this scene (0.."),
+                crate::obfstr_err!("). The length is video.SCENE_FRAMES; raise it, or ask for fewer."),
             ));
         }
 
@@ -557,7 +557,7 @@ impl RoadScene {
                 &opencv::core::no_array(),
                 -1,
             )
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot apply the illumination drift: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot apply the illumination drift: ")))?;
             canvas = drifted;
         }
 
@@ -602,7 +602,7 @@ impl RoadScene {
             &self.occluder,
             Scalar::new(96.0, 98.0, 100.0, 0.0),
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the occluder: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the occluder: ")))?;
 
         let mut noisy = Mat::default();
         opencv::core::add(
@@ -612,7 +612,7 @@ impl RoadScene {
             &opencv::core::no_array(),
             -1,
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot apply sensor noise: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot apply sensor noise: ")))?;
 
         Ok((noisy, GroundTruth {
             frame_id,

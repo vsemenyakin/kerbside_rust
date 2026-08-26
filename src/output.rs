@@ -45,6 +45,12 @@ use crate::track::types::VehicleState;
 
 /// Columns of the result CSV, in order. One row per frame, describing the
 /// vehicle furthest through the measurement zone -- the one about to be judged.
+///
+/// `introspection`-gated: these header names describe every stage's output field
+/// (`lead_residual_m`, `lead_coverage`, ...) and would hand a reverse-engineer
+/// the pipeline's semantics for free. A dist build writes no CSV, so the header
+/// is never emitted and this table is not compiled in.
+#[cfg(feature = "introspection")]
 pub const COLUMNS: [&str; 20] = [
     "frame_id",
     "n_blobs",
@@ -141,21 +147,33 @@ pub struct ResultWriter {
 impl ResultWriter {
     pub fn new(path: &str) -> Result<Self, String> {
         let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot create "), parent.display()))?;
+        // A dist build never opens the file. It computes the digest in memory and
+        // reports only the sha256, so neither the per-frame values (the behavioural
+        // channel a reverse-engineer bracketed thresholds from) nor the CSV header
+        // -- which would name every stage's output field -- ever touches the disk.
+        // The oracle for dist is the fingerprint, not the file. See `COLUMNS`,
+        // which is compiled out with the header write.
+        #[cfg(feature = "introspection")]
+        let file = {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot create "), parent.display()))?;
+                }
             }
-        }
-        let mut file = BufWriter::new(
-            File::create(&path).map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot open "), path.display()))?,
-        );
-        // CRLF, because `csv.writer` uses it on every platform.
-        write!(file, "{}\r\n", COLUMNS.join(","))
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot write the CSV header: ")))?;
+            let mut file = BufWriter::new(
+                File::create(&path).map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot open "), path.display()))?,
+            );
+            // CRLF, because `csv.writer` uses it on every platform.
+            write!(file, "{}\r\n", COLUMNS.join(","))
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write the CSV header: ")))?;
+            Some(file)
+        };
+        #[cfg(not(feature = "introspection"))]
+        let file = None;
         Ok(Self {
             path,
-            file: Some(file),
+            file,
             digest: Sha256::new(),
             rows: 0,
             violations: 0,
@@ -169,7 +187,7 @@ impl ResultWriter {
     pub fn close(&mut self) -> Result<String, String> {
         if let Some(mut file) = self.file.take() {
             file.flush()
-                .map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot flush "), self.path.display()))?;
+                .map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot flush "), self.path.display()))?;
         }
         let digest = std::mem::take(&mut self.digest);
         Ok(format!("{:x}", digest.finalize()))
@@ -182,7 +200,7 @@ impl Consumer for ResultWriter {
         let row = row_for(output, self.violations);
         let joined = row.join(",");
         if let Some(file) = self.file.as_mut() {
-            write!(file, "{joined}\r\n").map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot write a result row: ")))?;
+            write!(file, "{joined}\r\n").map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write a result row: ")))?;
         }
         // Hash the canonical text form, not the float values: it is the file
         // that gets compared, so it is the file that should be hashed.
@@ -226,7 +244,7 @@ impl OverlayWriter {
             .collect();
 
         let fourcc = opencv::videoio::VideoWriter::fourcc('m', 'p', '4', 'v')
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("fourcc: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("fourcc: ")))?;
         let writer = opencv::videoio::VideoWriter::new(
             path,
             fourcc,
@@ -234,12 +252,12 @@ impl OverlayWriter {
             Size::new(vid.FRAME_WIDTH, vid.FRAME_HEIGHT),
             true,
         )
-        .map_err(|e| format!("{}{path:?}: {e}", obfstr::obfstr!("cannot open video writer for ")))?;
+        .map_err(|e| format!("{}{path:?}: {e}", crate::obfstr_err!("cannot open video writer for ")))?;
         if !writer
             .is_opened()
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("video writer: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("video writer: ")))?
         {
-            return Err(format!("{}{path:?}", obfstr::obfstr!("cannot open video writer for ")));
+            return Err(format!("{}{path:?}", crate::obfstr_err!("cannot open video writer for ")));
         }
         Ok(Self {
             writer,
@@ -251,7 +269,7 @@ impl OverlayWriter {
     pub fn close(&mut self) -> Result<(), String> {
         self.writer
             .release()
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot close the overlay: ")))
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot close the overlay: ")))
     }
 }
 
@@ -274,7 +292,7 @@ impl Consumer for OverlayWriter {
             opencv::imgproc::LINE_8,
             0,
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the zone: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the zone: ")))?;
 
         for state in &output.vehicles.vehicles {
             let verdict = output
@@ -298,7 +316,7 @@ impl Consumer for OverlayWriter {
                 opencv::imgproc::LINE_8,
                 0,
             )
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw a vehicle box: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw a vehicle box: ")))?;
 
             if state.speed_kph > 0.0 {
                 // Speed only. The measured length is deliberately not shown: it
@@ -318,7 +336,7 @@ impl Consumer for OverlayWriter {
                     opencv::imgproc::LINE_AA,
                     false,
                 )
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot label a vehicle: ")))?;
+                .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot label a vehicle: ")))?;
             }
         }
 
@@ -342,7 +360,7 @@ impl Consumer for OverlayWriter {
                 opencv::imgproc::LINE_AA,
                 false,
             )
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the violation banner: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the violation banner: ")))?;
         }
         opencv::imgproc::put_text(
             &mut canvas,
@@ -360,11 +378,11 @@ impl Consumer for OverlayWriter {
             opencv::imgproc::LINE_AA,
             false,
         )
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot draw the frame caption: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot draw the frame caption: ")))?;
 
         self.writer
             .write(&canvas)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot write an overlay frame: ")))
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write an overlay frame: ")))
     }
 
     fn finish(&mut self) -> Result<Option<SinkSummary>, String> {
@@ -377,7 +395,7 @@ impl Consumer for OverlayWriter {
 pub fn frame_hash(frame: &Mat) -> Result<String, String> {
     let bytes = frame
         .data_bytes()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("frame is not contiguous: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("frame is not contiguous: ")))?;
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     Ok(format!("{:x}", hasher.finalize()))

@@ -85,7 +85,7 @@ fn run() -> Result<(), String> {
     let mut writer = match &args.mp4 {
         Some(path) => {
             let fourcc = opencv::videoio::VideoWriter::fourcc('m', 'p', '4', 'v')
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("fourcc: ")))?;
+                .map_err(|e| format!("{}{e}", kerbside::obfstr_err!("fourcc: ")))?;
             let writer = opencv::videoio::VideoWriter::new(
                 path,
                 fourcc,
@@ -95,7 +95,7 @@ fn run() -> Result<(), String> {
             )
             .map_err(|e| format!("cannot open video writer for {path:?}: {e}"))?;
             if !writer.is_opened()
-                .map_err(|e| format!("{}{e}", obfstr::obfstr!("video writer: ")))?
+                .map_err(|e| format!("{}{e}", kerbside::obfstr_err!("video writer: ")))?
             {
                 return Err(format!("cannot open video writer for {path:?}"));
             }
@@ -147,7 +147,7 @@ fn run() -> Result<(), String> {
         }
     }
     if let Some(raw) = raw.as_mut() {
-        raw.flush().map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot flush the raw clip: ")))?;
+        raw.flush().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("cannot flush the raw clip: ")))?;
     }
 
     seen.sort_by_key(|(id, _)| *id);

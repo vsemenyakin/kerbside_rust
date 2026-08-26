@@ -77,27 +77,27 @@ pub fn stage_names() -> &'static [String; STAGE_COUNT] {
     static NAMES: OnceLock<[String; STAGE_COUNT]> = OnceLock::new();
     NAMES.get_or_init(|| {
         [
-            obfstr::obfstr!("pre").to_string(),
-            obfstr::obfstr!("bg").to_string(),
-            obfstr::obfstr!("morph").to_string(),
-            obfstr::obfstr!("blobs").to_string(),
-            obfstr::obfstr!("bl_find").to_string(),
-            obfstr::obfstr!("bl_filter").to_string(),
-            obfstr::obfstr!("infer_join").to_string(),
-            obfstr::obfstr!("infer").to_string(),
-            obfstr::obfstr!("score").to_string(),
-            obfstr::obfstr!("sc_sample").to_string(),
-            obfstr::obfstr!("assoc").to_string(),
-            obfstr::obfstr!("as_score").to_string(),
-            obfstr::obfstr!("as_pick").to_string(),
-            obfstr::obfstr!("as_life").to_string(),
-            obfstr::obfstr!("speed").to_string(),
-            obfstr::obfstr!("sp_project").to_string(),
-            obfstr::obfstr!("sp_fit").to_string(),
-            obfstr::obfstr!("gate").to_string(),
-            obfstr::obfstr!("emit").to_string(),
-            obfstr::obfstr!("em_record").to_string(),
-            obfstr::obfstr!("total").to_string(),
+            crate::obfstr_err!("pre").to_string(),
+            crate::obfstr_err!("bg").to_string(),
+            crate::obfstr_err!("morph").to_string(),
+            crate::obfstr_err!("blobs").to_string(),
+            crate::obfstr_err!("bl_find").to_string(),
+            crate::obfstr_err!("bl_filter").to_string(),
+            crate::obfstr_err!("infer_join").to_string(),
+            crate::obfstr_err!("infer").to_string(),
+            crate::obfstr_err!("score").to_string(),
+            crate::obfstr_err!("sc_sample").to_string(),
+            crate::obfstr_err!("assoc").to_string(),
+            crate::obfstr_err!("as_score").to_string(),
+            crate::obfstr_err!("as_pick").to_string(),
+            crate::obfstr_err!("as_life").to_string(),
+            crate::obfstr_err!("speed").to_string(),
+            crate::obfstr_err!("sp_project").to_string(),
+            crate::obfstr_err!("sp_fit").to_string(),
+            crate::obfstr_err!("gate").to_string(),
+            crate::obfstr_err!("emit").to_string(),
+            crate::obfstr_err!("em_record").to_string(),
+            crate::obfstr_err!("total").to_string(),
         ]
     })
 }
@@ -169,23 +169,23 @@ impl Counters {
     pub fn summary(&self) -> String {
         let frames = self.frames.load(Ordering::Relaxed);
         if frames == 0 {
-            return obfstr::obfstr!("perf: no frames").to_string();
+            return crate::obfstr_err!("perf: no frames").to_string();
         }
         let mean = self.total_ms() / frames as f64;
         let over = self.over_budget.load(Ordering::Relaxed);
         let pct = 100.0 * over as f64 / frames as f64;
         format!(
             "{}{frames}{}{mean:.2}{}{:.2}{}{over} ({pct:.2}%){}{}{}{}{}{}",
-            obfstr::obfstr!("perf: "),
-            obfstr::obfstr!(" frames  mean "),
-            obfstr::obfstr!(" ms  max "),
+            crate::obfstr_err!("perf: "),
+            crate::obfstr_err!(" frames  mean "),
+            crate::obfstr_err!(" ms  max "),
             self.max_ms(),
-            obfstr::obfstr!(" ms  over-budget "),
-            obfstr::obfstr!("  dropped "),
+            crate::obfstr_err!(" ms  over-budget "),
+            crate::obfstr_err!("  dropped "),
             self.dropped.load(Ordering::Relaxed),
-            obfstr::obfstr!("  inferences "),
+            crate::obfstr_err!("  inferences "),
             self.inferences.load(Ordering::Relaxed),
-            obfstr::obfstr!("  violations "),
+            crate::obfstr_err!("  violations "),
             self.violations.load(Ordering::Relaxed),
         )
     }
@@ -331,8 +331,8 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     if !enabled {
         return Ok(());
     }
-    fs::create_dir_all(directory).map_err(|e| format!("{}{directory:?}: {e}", obfstr::obfstr!("cannot create ")))?;
-    let path = Path::new(directory).join(format!("{}{run_name}{}", obfstr::obfstr!("perf_"), obfstr::obfstr!(".csv")));
+    fs::create_dir_all(directory).map_err(|e| format!("{}{directory:?}: {e}", crate::obfstr_err!("cannot create ")))?;
+    let path = Path::new(directory).join(format!("{}{run_name}{}", crate::obfstr_err!("perf_"), crate::obfstr_err!(".csv")));
 
     // Leaked deliberately: the writer outlives every frame and is reachable
     // from the pipeline thread for the whole run. One allocation, once.
@@ -345,14 +345,14 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
     }));
 
     let mut file = BufWriter::new(
-        File::create(&path).map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot open "), path.display()))?,
+        File::create(&path).map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot open "), path.display()))?,
     );
-    writeln!(file, "frame_id,{}", stage_names().as_slice().join(","))
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot write the perf header: ")))?;
-    file.flush().map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot flush "), path.display()))?;
+    writeln!(file, "{}{}", crate::obfstr_err!("frame_id,"), stage_names().as_slice().join(","))
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot write the perf header: ")))?;
+    file.flush().map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot flush "), path.display()))?;
 
     let handle = std::thread::Builder::new()
-        .name(obfstr::obfstr!("perf-writer").into())
+        .name(crate::obfstr_err!("perf-writer").into())
         .spawn(move || {
             let mut out = file;
             loop {
@@ -370,7 +370,7 @@ pub fn configure(enabled: bool, directory: &str, flush_ms: i64, run_name: &str) 
                 }
             }
         })
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the perf writer thread: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot start the perf writer thread: ")))?;
 
     *writer.handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
     let _ = WRITER.set(writer);

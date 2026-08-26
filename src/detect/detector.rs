@@ -80,15 +80,15 @@ pub fn preprocess(working: &Mat, height: i32, width: i32) -> Result<Array4<f32>,
         0.0,
         opencv::imgproc::INTER_AREA,
     )
-    .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot resize for the model: ")))?;
+    .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot resize for the model: ")))?;
 
     let mut rgb = Mat::default();
     opencv::imgproc::cvt_color_def(&resized, &mut rgb, opencv::imgproc::COLOR_BGR2RGB)
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot convert to RGB: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot convert to RGB: ")))?;
 
     let bytes = rgb
         .data_bytes()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("the model input is not contiguous: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("the model input is not contiguous: ")))?;
     let (h, w) = (height as usize, width as usize);
     let mut tensor = Array4::<f32>::zeros((1, 3, h, w));
     for y in 0..h {
@@ -135,11 +135,11 @@ fn locate_model(file: &str) -> Result<PathBuf, String> {
         .join("\n  ");
     Err(format!(
         "{file}{}{looked}{}{file}{}",
-        obfstr::obfstr!(" was not found. Looked in:\n  "),
-        obfstr::obfstr!("\nSet KERBSIDE_MODEL_DIR, or build it in the Python repository \
+        crate::obfstr_err!(" was not found. Looked in:\n  "),
+        crate::obfstr_err!("\nSet KERBSIDE_MODEL_DIR, or build it in the Python repository \
                          with:\n    venv/bin/python tools/export_model.py\nand copy \
                          kerbside/detect/"),
-        obfstr::obfstr!(" into this project's model/ directory."),
+        crate::obfstr_err!(" into this project's model/ directory."),
     ))
 }
 
@@ -225,17 +225,17 @@ fn try_init_runtime() -> Result<(), String> {
         })
         .is_ok()
     {
-        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY}{}", obfstr::obfstr!(" (system library path)")));
+        let _ = RESOLVED_RUNTIME.set(format!("{RUNTIME_LIBRARY}{}", crate::obfstr_err!(" (system library path)")));
         return Ok(());
     }
 
     // The remedy depends on the platform, so do not print the other one's.
     let remedy = if cfg!(target_os = "windows") {
-        obfstr::obfstr!("Rebuild with the environment script, which copies it next to the binary:\n\
+        crate::obfstr_err!("Rebuild with the environment script, which copies it next to the binary:\n\
          \x20   . .\\scripts\\env-windows.ps1\n\x20   cargo build --release\n\
          Or set ORT_DYLIB_PATH to an ONNX Runtime 1.26 build.").to_string()
     } else {
-        obfstr::obfstr!("Fetch the runtime for this architecture and point at it, for example:\n\
+        crate::obfstr_err!("Fetch the runtime for this architecture and point at it, for example:\n\
          \x20   curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-aarch64-1.26.0.tgz\n\
          \x20   tar xf ort.tgz\n\
          \x20   export ORT_DYLIB_PATH=\"$PWD/onnxruntime-linux-aarch64-1.26.0/lib/libonnxruntime.so\"\n\
@@ -248,9 +248,9 @@ fn try_init_runtime() -> Result<(), String> {
         .join("\n  ");
     Err(format!(
         "{RUNTIME_LIBRARY}{}{looked}{}{remedy}{}",
-        obfstr::obfstr!(" was not found. Looked in:\n  "),
-        obfstr::obfstr!("\n  and on the system library search path.\n"),
-        obfstr::obfstr!("\nSee BUILD.md."),
+        crate::obfstr_err!(" was not found. Looked in:\n  "),
+        crate::obfstr_err!("\n  and on the system library search path.\n"),
+        crate::obfstr_err!("\nSee BUILD.md."),
     ))
 }
 
@@ -275,17 +275,17 @@ impl Detector {
         // would preempt the pipeline thread running the background model, which
         // is the very work this call is supposed to be hiding behind.
         let session = Session::builder()
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot configure ONNX Runtime: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot configure ONNX Runtime: ")))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set the optimisation level: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot set the optimisation level: ")))?
             .with_intra_threads(mdl.ORT_INTRA_THREADS as usize)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set intra-op threads: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot set intra-op threads: ")))?
             .with_inter_threads(mdl.ORT_INTER_THREADS as usize)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot set inter-op threads: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot set inter-op threads: ")))?
             .with_parallel_execution(false)
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot select sequential execution: ")))?
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot select sequential execution: ")))?
             .commit_from_file(&path)
-            .map_err(|e| format!("{}{}: {e}", obfstr::obfstr!("cannot load "), path.display()))?;
+            .map_err(|e| format!("{}{}: {e}", crate::obfstr_err!("cannot load "), path.display()))?;
 
         let (tx, rx) = mpsc::channel::<Job>();
         let height = mdl.INPUT_HEIGHT;
@@ -295,7 +295,7 @@ impl Detector {
         // Python, where any thread could in principle call `session.run`, and it
         // is free: only one thread ever needed it.
         let worker = std::thread::Builder::new()
-            .name(obfstr::obfstr!("detector").into())
+            .name(crate::obfstr_err!("detector").into())
             .spawn(move || {
                 let mut session = session;
                 while let Ok((frame, reply)) = rx.recv() {
@@ -305,7 +305,7 @@ impl Detector {
                     let _ = reply.send(outcome);
                 }
             })
-            .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot start the detector thread: ")))?;
+            .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot start the detector thread: ")))?;
 
         // The input geometry is captured by the worker closure above, not kept
         // here: only the worker ever needs it, and a second copy on this struct
@@ -340,9 +340,9 @@ impl Detector {
         let (tx, rx) = mpsc::channel();
         self.jobs
             .as_ref()
-            .ok_or_else(|| obfstr::obfstr!("the detector has been shut down").to_string())?
+            .ok_or_else(|| crate::obfstr_err!("the detector has been shut down").to_string())?
             .send((working, tx))
-            .map_err(|_| obfstr::obfstr!("the detector thread has stopped").to_string())?;
+            .map_err(|_| crate::obfstr_err!("the detector thread has stopped").to_string())?;
         Ok(rx)
     }
 
@@ -369,23 +369,23 @@ fn run_once(
 ) -> Result<Inference, String> {
     let tensor = preprocess(working, height, width)?;
     let began = Instant::now();
-    let input = Tensor::from_array(tensor).map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot build the input: ")))?;
+    let input = Tensor::from_array(tensor).map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot build the input: ")))?;
     let outputs = session
         .run(ort::inputs!["input" => input])
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("inference failed: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("inference failed: ")))?;
     let infer_ms = began.elapsed().as_secs_f64() * 1000.0;
 
     let view = outputs["likelihood"]
         .try_extract_array::<f32>()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot read the likelihood map: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("cannot read the likelihood map: ")))?;
     let shape = view.shape().to_vec();
     if shape.len() != 4 {
-        return Err(format!("{}{shape:?}", obfstr::obfstr!("expected a 4-D likelihood map, got shape ")));
+        return Err(format!("{}{shape:?}", crate::obfstr_err!("expected a 4-D likelihood map, got shape ")));
     }
     // `likelihood[0, 0]` -- one image, one channel.
     let grid = view
         .into_dimensionality::<ndarray::Ix4>()
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("unexpected likelihood shape: ")))?;
+        .map_err(|e| format!("{}{e}", crate::obfstr_err!("unexpected likelihood shape: ")))?;
     let map = grid.slice(ndarray::s![0, 0, .., ..]).to_owned();
     Ok(Inference {
         likelihood: map,

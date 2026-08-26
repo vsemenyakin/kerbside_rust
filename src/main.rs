@@ -37,6 +37,12 @@ use kerbside::source::RoadScene;
 
 // Was `const USAGE: &str`; a const cannot hold an obfstr! value (it decodes at
 // run time), so this is a function and the help text ships only as ciphertext.
+//
+// The whole help text is `introspection`-gated: a dist build has no `--help`
+// and no unknown-argument hint, so this large descriptive string is not linked
+// at all. The CLI x-ray the reverse-engineering reports built came straight from
+// running `--help`.
+#[cfg(feature = "introspection")]
 fn usage() -> String {
     obfstr::obfstr!("\
 kerbside -- a roadside speed-enforcement camera
@@ -70,61 +76,99 @@ struct Args {
     overlay: Option<String>,
     perf: bool,
     perf_dir: Option<String>,
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
     gc_stats: bool,
     threaded: bool,
     dump_settings: bool,
+    // Only read by the introspection-gated `--version` handler; in a dist build
+    // the flag does not exist and the field is never read.
+    #[cfg_attr(not(feature = "introspection"), allow(dead_code))]
     version: bool,
 }
 
+/// The unknown-argument error. In dev/release it names the argument and prints
+/// the help; a dist build has neither the help nor the message, so it returns an
+/// empty error -- the process still exits non-zero, saying nothing.
+#[cfg(feature = "introspection")]
+fn unknown_arg(a: &str) -> String {
+    format!("{}{a}\n\n{}", obfstr::obfstr!("unknown argument: "), usage())
+}
+#[cfg(not(feature = "introspection"))]
+fn unknown_arg(_a: &str) -> String {
+    String::new()
+}
+
 fn parse_args() -> Result<Args, String> {
+    // A dist build writes no CSV, so it needs no default path and `--out` is not
+    // accepted -- the string, and the flag, are absent from the shipped binary.
+    #[cfg(feature = "introspection")]
+    let default_out = obfstr::obfstr!("telemetry/results.csv").to_string();
+    #[cfg(not(feature = "introspection"))]
+    let default_out = String::new();
     let mut args = Args {
-        out: obfstr::obfstr!("telemetry/results.csv").to_string(),
+        out: default_out,
         ..Default::default()
     };
     let mut argv = std::env::args().skip(1);
     while let Some(arg) = argv.next() {
-        let mut value = || argv.next().ok_or_else(|| format!("{arg}{}", obfstr::obfstr!(" expects a value")));
+        let mut value = || argv.next().ok_or_else(|| format!("{arg}{}", kerbside::obfstr_err!(" expects a value")));
         // if/else with obfstr comparisons rather than a `match` on literals:
         // a match pattern must be a plain literal, so its text would ship in
         // .rodata; comparing against an obfstr! value keeps the flag names out.
         let a = arg.as_str();
+        let mut handled = true;
+        // Core flags -- everything the oracle path needs. Always present.
         if a == obfstr::obfstr!("--replay") {
             args.replay = true;
-        } else if a == obfstr::obfstr!("--realtime") {
-            args.realtime = true;
-        } else if a == obfstr::obfstr!("--profile") {
-            args.profile = Some(value()?);
         } else if a == obfstr::obfstr!("--frames") {
-            args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--frames: ")))?);
+            args.frames = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--frames: ")))?);
         } else if a == obfstr::obfstr!("--seed") {
-            args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--seed: ")))?);
+            args.seed = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--seed: ")))?);
         } else if a == obfstr::obfstr!("--limit") {
-            args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", obfstr::obfstr!("--limit: ")))?);
-        } else if a == obfstr::obfstr!("--out") {
-            args.out = value()?;
-        } else if a == obfstr::obfstr!("--overlay") {
-            args.overlay = Some(value()?);
-        } else if a == obfstr::obfstr!("--perf") {
-            args.perf = true;
-        } else if a == obfstr::obfstr!("--perf-dir") {
-            args.perf_dir = Some(value()?);
-        } else if a == obfstr::obfstr!("--gc-stats") {
-            args.gc_stats = true;
-        } else if a == obfstr::obfstr!("--threaded") {
-            args.threaded = true;
-        } else if a == obfstr::obfstr!("--dump-settings") {
-            args.dump_settings = true;
-        } else if a == obfstr::obfstr!("--version") || a == obfstr::obfstr!("-V") {
-            args.version = true;
-        } else if a == obfstr::obfstr!("-h") || a == obfstr::obfstr!("--help") {
-            println!("{}", usage());
-            std::process::exit(0);
+            args.limit = Some(value()?.parse().map_err(|e| format!("{}{e}", kerbside::obfstr_err!("--limit: ")))?);
         } else {
-            return Err(format!("{}{a}\n\n{}", obfstr::obfstr!("unknown argument: "), usage()));
+            handled = false;
+        }
+        // Diagnostic / introspection flags. A dist build drops this whole block,
+        // so their names, the help text and the version text never enter the
+        // shipped binary; none is needed to run the oracle. In dist an unknown
+        // flag falls through to the (silent) unknown-argument path below.
+        #[cfg(feature = "introspection")]
+        if !handled {
+            handled = true;
+            if a == obfstr::obfstr!("--realtime") {
+                args.realtime = true;
+            } else if a == obfstr::obfstr!("--profile") {
+                args.profile = Some(value()?);
+            } else if a == obfstr::obfstr!("--out") {
+                args.out = value()?;
+            } else if a == obfstr::obfstr!("--overlay") {
+                args.overlay = Some(value()?);
+            } else if a == obfstr::obfstr!("--perf") {
+                args.perf = true;
+            } else if a == obfstr::obfstr!("--perf-dir") {
+                args.perf_dir = Some(value()?);
+            } else if a == obfstr::obfstr!("--gc-stats") {
+                args.gc_stats = true;
+            } else if a == obfstr::obfstr!("--threaded") {
+                args.threaded = true;
+            } else if a == obfstr::obfstr!("--dump-settings") {
+                args.dump_settings = true;
+            } else if a == obfstr::obfstr!("--version") || a == obfstr::obfstr!("-V") {
+                args.version = true;
+            } else if a == obfstr::obfstr!("-h") || a == obfstr::obfstr!("--help") {
+                println!("{}", usage());
+                std::process::exit(0);
+            } else {
+                handled = false;
+            }
+        }
+        if !handled {
+            return Err(unknown_arg(a));
         }
     }
     if args.replay && args.realtime {
-        return Err(obfstr::obfstr!("--replay and --realtime are mutually exclusive").into());
+        return Err(kerbside::obfstr_err!("--replay and --realtime are mutually exclusive").into());
     }
     Ok(args)
 }
@@ -136,7 +180,7 @@ fn parse_args() -> Result<Args, String> {
 /// machines incomparable, which defeats the purpose of this program.
 fn pin_runtime(settings: &Settings) -> Result<(), String> {
     opencv::core::set_num_threads(settings.telemetry.OPENCV_THREADS)
-        .map_err(|e| format!("{}{e}", obfstr::obfstr!("cannot pin the OpenCV thread pool: ")))
+        .map_err(|e| format!("{}{e}", kerbside::obfstr_err!("cannot pin the OpenCV thread pool: ")))
 }
 
 /// Timestamps come from the frame index, not the clock.
@@ -160,6 +204,12 @@ fn frame_for(scene: &RoadScene, settings: &Settings, frame_id: i64) -> Result<Ra
 /// them. This is the equivalent, and it reports the *resolved* ONNX Runtime
 /// path rather than a version string: the crate exposes no version accessor,
 /// and which file was loaded is the thing that actually decides the numbers.
+///
+/// `introspection`-gated: `--version` is a diagnostic flag a dist build drops,
+/// so none of this text (build profile, library banners, the resolved runtime
+/// path) is linked into the shipped binary. The reports used `--version` to
+/// fingerprint the build.
+#[cfg(feature = "introspection")]
 fn print_version() {
     println!("{}{} ({})", obfstr::obfstr!("kerbside "), env!("CARGO_PKG_VERSION"), build_profile());
     match opencv::core::get_version_string() {
@@ -176,6 +226,7 @@ fn print_version() {
     }
 }
 
+#[cfg(feature = "introspection")]
 fn build_profile() -> String {
     // A debug build is several times slower and must never be benchmarked; the
     // bench scripts refuse to record one, and this is how they can tell.
@@ -189,6 +240,9 @@ fn build_profile() -> String {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
+    // `--version` only exists in an introspection build; in dist `args.version`
+    // is never set and this whole block is compiled out with `print_version`.
+    #[cfg(feature = "introspection")]
     if args.version {
         print_version();
         return Ok(());
@@ -231,7 +285,7 @@ fn run() -> Result<(), String> {
         }
         #[cfg(not(feature = "introspection"))]
         {
-            return Err(obfstr::obfstr!("--dump-settings is unavailable in this build: it was \
+            return Err(kerbside::obfstr_err!("--dump-settings is unavailable in this build: it was \
                         compiled without the introspection feature, which is what \
                         keeps the settings field names out of the binary")
                 .into());
@@ -242,9 +296,9 @@ fn run() -> Result<(), String> {
     // Bound to an owned String: an obfstr! result borrows a stack temporary that
     // is dropped at the end of its `{ }` arm, so it cannot be passed inline.
     let run_name = if realtime {
-        obfstr::obfstr!("realtime").to_string()
+        kerbside::obfstr_err!("realtime").to_string()
     } else {
-        obfstr::obfstr!("replay").to_string()
+        kerbside::obfstr_err!("replay").to_string()
     };
     perf::configure(
         settings.telemetry.MEASURE_STAGES,
@@ -272,7 +326,7 @@ fn run() -> Result<(), String> {
     // and without this it would accept `--overlay` and silently write no file.
     #[cfg(not(feature = "overlay"))]
     if args.overlay.is_some() {
-        return Err(obfstr::obfstr!("--overlay is unavailable in this build: it was compiled \
+        return Err(kerbside::obfstr_err!("--overlay is unavailable in this build: it was compiled \
                     without the overlay feature (opencv videoio/imgcodecs). The dist build drops \
                     it so the video backend is not linked; use a release build to record an overlay")
             .into());
@@ -318,9 +372,17 @@ fn run() -> Result<(), String> {
         None => (args.out.clone(), 0, 0, String::new()),
     };
 
-    println!("{}", perf::shutdown());
-    println!("{}{wall:.2}{}{:.1}{}", obfstr::obfstr!("wall "), obfstr::obfstr!(" s  ("), total as f64 / wall, obfstr::obfstr!(" fps effective)"));
-    println!("{}{path}{}{rows}{}{violations}", obfstr::obfstr!("results "), obfstr::obfstr!("  rows "), obfstr::obfstr!("  violations "));
+    // The perf writer thread is stopped here regardless; only the *printing* of
+    // the diagnostic summary is introspection-gated. A dist build emits exactly
+    // one line -- the sha256 fingerprint -- and no diagnostics at all: not the
+    // labels, and not the orphaned numbers a bare string-cut would leave behind.
+    let perf_summary = perf::shutdown();
+    #[cfg(feature = "introspection")]
+    {
+        println!("{perf_summary}");
+        println!("{}{wall:.2}{}{:.1}{}", obfstr::obfstr!("wall "), obfstr::obfstr!(" s  ("), total as f64 / wall, obfstr::obfstr!(" fps effective)"));
+        println!("{}{path}{}{rows}{}{violations}", obfstr::obfstr!("results "), obfstr::obfstr!("  rows "), obfstr::obfstr!("  violations "));
+    }
     println!("{}{digest}", obfstr::obfstr!("sha256 "));
     // Deliberately *not* called "tracked containers" like the Python's line.
     // The Python counts GC-tracked dicts, lists and tuples because those are
@@ -330,6 +392,7 @@ fn run() -> Result<(), String> {
     // printing them under the same label would invite a comparison that means
     // nothing. What is comparable is the frame count and the fact that both
     // hold the frames by reference.
+    #[cfg(feature = "introspection")]
     println!(
         "{}{ring_frames}{}{}{}",
         obfstr::obfstr!("ring retains "),
@@ -337,6 +400,11 @@ fn run() -> Result<(), String> {
         thousands(ring_containers as u64),
         obfstr::obfstr!(" retained allocations")
     );
+    #[cfg(not(feature = "introspection"))]
+    let _ = (&perf_summary, &path, rows, violations, wall, ring_frames, ring_containers);
+    // `--gc-stats` exists only in an introspection build, so a dist build never
+    // reaches `report_gc` and it is compiled out with its `println!`s.
+    #[cfg(feature = "introspection")]
     if args.gc_stats {
         report_gc();
     }
@@ -396,21 +464,25 @@ fn run_realtime(
 /// and the ring is released when the ring evicts a frame -- on the pipeline
 /// thread, at a point the program chooses, in bounded time. That is the whole
 /// finding, so it is stated rather than silently omitted.
+///
+/// `introspection`-gated with `--gc-stats`, so a dist build carries neither the
+/// call nor these strings.
+#[cfg(feature = "introspection")]
 fn report_gc() {
-    println!("{}", obfstr::obfstr!("gc: no tracing collector in this build"));
+    println!("{}", kerbside::obfstr_err!("gc: no tracing collector in this build"));
     println!(
         "{}",
-        obfstr::obfstr!("  the evidence record and the ring allocate exactly as the Python's do; \
+        kerbside::obfstr_err!("  the evidence record and the ring allocate exactly as the Python's do; \
          what is gone is the collection pass over them")
     );
     let counters = perf::counters();
     println!(
         "{}{:.3}{}{}{}",
-        obfstr::obfstr!("  worst frame "),
+        kerbside::obfstr_err!("  worst frame "),
         counters.max_ms(),
-        obfstr::obfstr!(" ms over "),
+        kerbside::obfstr_err!(" ms over "),
         counters.frames.load(Ordering::Relaxed),
-        obfstr::obfstr!(" frames -- compare against the Python's gen2 pause distribution")
+        kerbside::obfstr_err!(" frames -- compare against the Python's gen2 pause distribution")
     );
 }
 
@@ -444,6 +516,11 @@ fn harden() {
     // an emulator that stubs the probe (or never runs start-up) it comes out
     // wrong, so every `encf!`/`enci!` decodes to garbage. See `crypt::keying`.
     kerbside::crypt::init_keying();
+    // Refuse if a library was preloaded into us. The observed dumps came from an
+    // in-process LD_PRELOAD shim (a memory dumper + a /proc/self/status faker),
+    // which anti-ptrace cannot stop because it never traces. Catch the injection
+    // itself instead. See `detect_injection` for the (honest) limits.
+    detect_injection();
     // PR_SET_DUMPABLE (4) = 0 (SUID_DUMP_DISABLE): drop dumpability so a non-root
     // ptrace/gcore of this process is denied by the kernel.
     extern "C" {
@@ -472,7 +549,112 @@ fn harden() {
             }
         }
     }
+    // Seal our own code last, once every relocation is done. After this the
+    // `.text` pages cannot be made writable, so a software breakpoint (which
+    // rewrites an instruction) cannot be inserted and the code cannot be
+    // detoured -- exactly the step the reverse-engineering report was blocked on.
+    seal_code();
 }
+
+/// Refuse to run under a preloaded library (the round-8 in-process dumper).
+///
+/// Two checks: the `LD_PRELOAD`/`LD_AUDIT` launch environment, and any *executable*
+/// `.so` mapped from outside the system library directories (the shims were loaded
+/// from a home directory). Honest limits: a shim can `unsetenv` before we look,
+/// and can be staged inside `/usr` to pass the map scan -- this catches the
+/// technique that was actually used, it is not a wall. If we exit here we exit
+/// before the scene or the model is built, so a dump taken at exit is empty.
+#[cfg(feature = "anti-tamper")]
+fn detect_injection() {
+    for var in ["LD_PRELOAD", "LD_AUDIT"] {
+        if std::env::var_os(var).is_some_and(|v| !v.is_empty()) {
+            std::process::exit(1);
+        }
+    }
+    if let Ok(maps) = std::fs::read_to_string("/proc/self/maps") {
+        for line in maps.lines() {
+            let mut it = line.split_whitespace();
+            let _range = it.next();
+            let perms = match it.next() {
+                Some(p) => p,
+                None => continue,
+            };
+            if !perms.contains('x') {
+                continue;
+            }
+            let path = match line.split_whitespace().last() {
+                Some(p) => p,
+                None => continue,
+            };
+            if !(path.ends_with(".so") || path.contains(".so.")) {
+                continue;
+            }
+            let base = path.rsplit('/').next().unwrap_or(path);
+            let system = path.starts_with("/usr/")
+                || path.starts_with("/lib/")
+                || path.starts_with("/lib64/")
+                || base.starts_with("libonnxruntime");
+            if !system {
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+/// `mseal(2)` every executable region of this binary, so its `.text` protection
+/// can never be changed again (kernel 6.10+; the Pi runs 6.18). syscall 462 on
+/// the aarch64 generic table; called via `svc` because glibc does not wrap it.
+#[cfg(all(feature = "anti-tamper", target_arch = "aarch64"))]
+fn seal_code() {
+    let exe = match std::fs::read_link("/proc/self/exe")
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_owned))
+    {
+        Some(e) => e,
+        None => return,
+    };
+    let maps = match std::fs::read_to_string("/proc/self/maps") {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    for line in maps.lines() {
+        let mut it = line.split_whitespace();
+        let range = match it.next() {
+            Some(r) => r,
+            None => continue,
+        };
+        let perms = match it.next() {
+            Some(p) => p,
+            None => continue,
+        };
+        if !perms.contains('x') {
+            continue;
+        }
+        if line.split_whitespace().last() != Some(exe.as_str()) {
+            continue;
+        }
+        if let Some((s, e)) = range.split_once('-') {
+            if let (Ok(start), Ok(end)) =
+                (u64::from_str_radix(s, 16), u64::from_str_radix(e, 16))
+            {
+                unsafe {
+                    core::arch::asm!(
+                        "svc #0",
+                        in("x8") 462u64,        // __NR_mseal
+                        in("x0") start,
+                        in("x1") end - start,
+                        in("x2") 0u64,          // flags
+                        lateout("x0") _,
+                        options(nostack),
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "anti-tamper", not(target_arch = "aarch64")))]
+fn seal_code() {}
 
 #[cfg(not(feature = "anti-tamper"))]
 #[inline]
@@ -483,7 +665,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("{}{message}", obfstr::obfstr!("kerbside: "));
+            eprintln!("{}{message}", kerbside::obfstr_err!("kerbside: "));
             ExitCode::FAILURE
         }
     }
