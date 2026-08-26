@@ -620,3 +620,14 @@ impl RoadScene {
         }))
     }
 }
+
+impl crate::source::FrameSource for RoadScene {
+    fn frame_count(&self) -> i64 {
+        self.frames
+    }
+
+    /// The pipeline only needs the pixels; the ground truth is dropped.
+    fn frame(&self, id: i64) -> Result<Mat, String> {
+        self.render(id).map(|(image, _truth)| image)
+    }
+}
