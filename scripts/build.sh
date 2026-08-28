@@ -293,6 +293,25 @@ if [[ "$PROFILE" == "dist" ]]; then
     fi
 fi
 
+# --- scrub the OpenCV identifying strings (dist only) --------------------
+# cv::getBuildInformation() returns one big embedded string (OpenCV version,
+# platform, CPU features, the full C/C++ compiler command lines, the module list,
+# FFMPEG/GStreamer flags), and the exact version also survives in a couple of
+# plugin version-mismatch messages and the bare getVersionString() value. kerbside
+# never calls getBuildInformation and this is a static, plugin-free build, so all
+# of it is dead/display-only data (verified: blanking it leaves the oracle digest
+# unchanged). Neutralise it in place, size-preserving, so ELF offsets and the
+# oracle are untouched.
+if [[ "$PROFILE" == "dist" ]]; then
+    _scrub_py="$(command -v python3 || command -v python || true)"
+    if [[ -n "$_scrub_py" ]]; then
+        "$_scrub_py" tools/scrub_opencv.py "$BINARY" \
+            || echo "note: scrub_opencv failed on $BINARY" >&2
+    else
+        echo "note: python not found -- OpenCV banner/version left in $BINARY" >&2
+    fi
+fi
+
 # --- the leaked-path check -----------------------------------------------
 # dev and release deliberately do not harden away the first-party module tree;
 # only dist does. So allow first-party paths for those (the check still fails on
