@@ -231,6 +231,23 @@ fi
 
 BINARY="target/$OUT_DIR/kerbside"
 
+# --- strip the toolchain fingerprint (dist only) -------------------------
+# `.comment` carries the GCC and rustc version strings (e.g. "GCC: (Debian
+# 14.2.0-19) 14.2.0" / "rustc version 1.89.0-nightly (...)"). It is a
+# non-allocated, informational section -- dropping it is behaviour-neutral (the
+# oracle digest is unchanged) but denies a reverse engineer the exact compiler
+# and toolchain versions they use to match a disassembler/plugin build. `strip =
+# "symbols"` does not remove it, so do it explicitly. Not done for dev/release,
+# which stay diagnosable.
+if [[ "$PROFILE" == "dist" ]]; then
+    if command -v objcopy >/dev/null 2>&1; then
+        objcopy --remove-section .comment "$BINARY" 2>/dev/null \
+            || echo "note: could not remove .comment from $BINARY" >&2
+    else
+        echo "note: objcopy not found -- .comment left in $BINARY" >&2
+    fi
+fi
+
 # --- the leaked-path check -----------------------------------------------
 # dev and release deliberately do not harden away the first-party module tree;
 # only dist does. So allow first-party paths for those (the check still fails on
