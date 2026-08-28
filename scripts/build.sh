@@ -312,6 +312,26 @@ if [[ "$PROFILE" == "dist" ]]; then
     fi
 fi
 
+# --- seal the decode key to the code (dist only) -------------------------
+# MUST be the last step that could touch the binary: it hashes the final .text
+# and patches SALT2 so the anti-tamper decode key resolves to K only for exactly
+# this code (see src/crypt.rs::keying and tools/patch_integrity.py). Any later
+# byte change to .text -- a spliced-in argument logger, a breakpoint -- moves the
+# hash, so every encrypted constant/string decodes to garbage. Fail the build if
+# it cannot run, rather than shipping an unsealed (sentinel-keyed) binary that
+# would itself produce garbage.
+if [[ "$PROFILE" == "dist" ]]; then
+    _seal_py="$(command -v python3 || command -v python || true)"
+    if [[ -z "$_seal_py" ]]; then
+        echo "REFUSING TO SHIP: python not found -- cannot seal $BINARY to its code." >&2
+        exit 1
+    fi
+    if ! "$_seal_py" tools/patch_integrity.py "$BINARY"; then
+        echo "REFUSING TO SHIP: could not seal $BINARY (patch_integrity failed)." >&2
+        exit 1
+    fi
+fi
+
 # --- the leaked-path check -----------------------------------------------
 # dev and release deliberately do not harden away the first-party module tree;
 # only dist does. So allow first-party paths for those (the check still fails on

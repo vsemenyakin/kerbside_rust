@@ -26,11 +26,19 @@
 //! including in an emulator that stubs the environment.
 //!
 //! Under `anti-tamper`, [`__key`] is no longer the constant `K`. It is derived
-//! once at start-up (see [`init_keying`], called from `main::harden`) from a
-//! probe of the real environment -- `getpagesize()`, which is a fixed value on
-//! the target but which an emulator that no-ops the syscall returns wrong. The
-//! embedded `SALT = C_REAL ^ K` folds the probe with the true key, so
-//! `probe() ^ SALT == K` **only** when `probe()` returns the real value:
+//! once at start-up (see [`init_keying`], called from `main::harden`) from two
+//! things: a probe of the real environment -- `getpagesize()`, a fixed value on
+//! the target but wrong under an emulator that no-ops the syscall -- **and a hash
+//! of this process's own `.text`**. The build tool patches an embedded salt to
+//! `SALT2 = C_REAL ^ text_hash ^ K`, so `probe() ^ text_hash() ^ SALT2 == K`
+//! **only** on the genuine hardware running the *unpatched* code:
+//!
+//! * patch any code byte (e.g. to splice in an argument logger, the way an
+//!   LD_PRELOAD shim would from outside) and the `.text` hash moves, the key is
+//!   wrong, and every constant/string decodes to garbage -- there is no compare
+//!   to NOP, because the key *is* a function of the code bytes;
+//!
+//! and, from the environment probe alone:
 //!
 //! * on the device: `getpagesize() == C_REAL` -> key is `K` -> decodes correct,
 //!   the result CSV (and the oracle) does not move;
@@ -86,10 +94,24 @@ mod keying {
     /// match the deployment hardware exactly.
     const C_REAL: u64 = 16384;
 
-    /// Folds the probe with the true key. Shipped in `.rodata`; on its own it is
-    /// `K` XORed with a known small integer, useless without also running the
-    /// probe on real hardware (which is exactly what an emulator cannot do).
-    const SALT: u64 = C_REAL ^ K;
+    /// Placeholder for the code-integrity salt. `tools/patch_integrity.py`
+    /// overwrites the shipped binary's copy of this word (found by this sentinel)
+    /// with `C_REAL ^ text_hash() ^ K`, computed over the *final* `.text`. So at
+    /// run time `probe ^ text_hash() ^ SALT2 == K` holds **only** on the genuine
+    /// hardware running the *unpatched* code. Kept in `.data` (interior-mutable
+    /// atomic, so it is a real memory load, never an immediate baked into `.text`)
+    /// -- patching it therefore does not change the hash it feeds.
+    ///
+    /// If the build's patch step never ran, this sentinel stays in place and every
+    /// decode yields garbage. That is the intended safe failure: a binary that was
+    /// not integrity-sealed does not silently ship working.
+    const SALT2_SENTINEL: u64 = 0xA1B2_C3D4_E5F6_0718;
+    // `#[used]` + a *volatile* read below keep this as a real 8-byte word in
+    // writable `.data` -- so the offline tool can find and patch it, and the
+    // optimiser cannot fold the read-only atomic back into an immediate baked
+    // into `.text` (which would leave nothing to patch and no memory load).
+    #[used]
+    static SALT2: AtomicU64 = AtomicU64::new(SALT2_SENTINEL);
 
     /// Derived once by [`init`]; zero until then, so any decode that runs before
     /// start-up (e.g. an emulator sweeping a block in isolation) gets a wrong
@@ -98,18 +120,92 @@ mod keying {
 
     extern "C" {
         fn getpagesize() -> i32;
+        fn getauxval(kind: u64) -> u64;
     }
 
-    /// Probe the environment and assemble the decode key. **Must run before any
-    /// `encf!`/`enci!`.** `main::harden` calls it first thing.
+    // Just enough of the ELF program-header ABI to find our own code segment.
+    const AT_PHDR: u64 = 3;
+    const AT_PHNUM: u64 = 5;
+    const PT_LOAD: u32 = 1;
+    const PT_PHDR: u32 = 6;
+    const PF_X: u32 = 1;
+
+    #[repr(C)]
+    struct Phdr {
+        p_type: u32,
+        p_flags: u32,
+        p_offset: u64,
+        p_vaddr: u64,
+        p_paddr: u64,
+        p_filesz: u64,
+        p_memsz: u64,
+        p_align: u64,
+    }
+
+    /// FNV-1a over a byte slice. Cheap (a few ms over a multi-MB `.text`), and
+    /// trivially reproducible by the offline patch tool so both sides agree.
+    fn fnv1a(bytes: &[u8]) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    }
+
+    /// Hash this process's own executable segment (`.text`), located exactly via
+    /// the auxiliary vector so the byte range matches what the file-side tool
+    /// hashes. Returns 0 if the layout cannot be read -- which makes the key wrong
+    /// and the binary fail closed, never open.
+    fn text_hash() -> u64 {
+        unsafe {
+            let phdr_addr = getauxval(AT_PHDR);
+            let phnum = getauxval(AT_PHNUM) as usize;
+            if phdr_addr == 0 || phnum == 0 {
+                return 0;
+            }
+            let phdrs = phdr_addr as *const Phdr;
+            // Load bias = (phdrs in memory) - (their vaddr as recorded in PT_PHDR).
+            let mut bias: u64 = 0;
+            let mut have_bias = false;
+            for i in 0..phnum {
+                let p = &*phdrs.add(i);
+                if p.p_type == PT_PHDR {
+                    bias = phdr_addr.wrapping_sub(p.p_vaddr);
+                    have_bias = true;
+                    break;
+                }
+            }
+            if !have_bias {
+                return 0;
+            }
+            for i in 0..phnum {
+                let p = &*phdrs.add(i);
+                if p.p_type == PT_LOAD && (p.p_flags & PF_X) != 0 {
+                    let start = bias.wrapping_add(p.p_vaddr) as *const u8;
+                    let bytes = core::slice::from_raw_parts(start, p.p_filesz as usize);
+                    return fnv1a(bytes);
+                }
+            }
+            0
+        }
+    }
+
+    /// Probe the environment, hash our own code, and assemble the decode key.
+    /// **Must run before any `encf!`/`enci!`.** `main::harden` calls it first.
     #[inline(never)]
     pub fn init() {
         let probe = unsafe { getpagesize() } as u32 as u64;
-        RUNTIME_KEY.store(probe ^ SALT, Ordering::Release);
+        let th = text_hash();
+        // Volatile read of the raw storage: the tool patches these bytes on disk
+        // directly, and volatile forbids the compiler from assuming the value.
+        let salt2 = unsafe { core::ptr::read_volatile(SALT2.as_ptr()) };
+        RUNTIME_KEY.store(probe ^ th ^ salt2, Ordering::Release);
     }
 
-    /// The decode key: `K` on real hardware once [`init`] has run, garbage under
-    /// an emulator that stubs the probe or never runs start-up.
+    /// The decode key: `K` on real hardware running unpatched code once [`init`]
+    /// has run; garbage under an emulator that stubs the probe, if the code was
+    /// patched, or before start-up.
     #[inline(always)]
     pub fn key() -> u64 {
         black_box(RUNTIME_KEY.load(Ordering::Acquire))
