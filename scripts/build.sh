@@ -205,13 +205,58 @@ fi
 
 echo
 echo "== building profile '$PROFILE' -> target/$OUT_DIR =="
+
+# `cargo build` (not `cargo rustc`): the plugin is already in RUSTFLAGS, and
+# `cargo rustc` + `-Zbuild-std` self-deadlocks on the target lock. Obfuscation is
+# scoped to this crate by policy.json, not by which crate cargo passes args to.
+#
+# There is a *second* -Zbuild-std deadlock, independent of `cargo rustc`: cargo
+# opens target/<triple>/dist/.cargo-lock twice and flock() blocks on the lock this
+# same process already holds. It only triggers when an existing std cache is in a
+# stale, partially built state -- after a reboot, or after a previous build was
+# interrupted; a clean std build takes the single-lock path and does not deadlock.
+# The symptom is the line "Blocking waiting for file lock on build directory" with
+# no "Compiling" ever following. `build_dist_once` runs the build under a watchdog
+# that detects exactly that hang (rc 42) so the caller can wipe the per-target tree
+# and retry from clean. Grace window overridable via BUILD_STD_GRACE (seconds).
+build_dist_once() {
+    local log; log="$(mktemp)"
+    cargo "${CARGO_ARGS[@]}" build --profile dist "${BUILD_STD_ARGS[@]}" --bin kerbside >"$log" 2>&1 &
+    local cpid=$!
+    tail -n +1 -f "$log" 2>/dev/null & local tpid=$!
+    # The "Blocking waiting for file lock" line is printed only on the self-
+    # deadlock here (build.sh is the sole builder, so there is no real contender
+    # for the lock); a healthy build reaches "Compiling" within seconds. So a
+    # short grace is enough to tell the two apart and recover quickly.
+    local waited=0 grace="${BUILD_STD_GRACE:-45}" deadlock=0
+    while kill -0 "$cpid" 2>/dev/null; do
+        if grep -q "Compiling" "$log" 2>/dev/null; then break; fi   # compilation started -> healthy
+        if (( waited >= grace )) && grep -q "Blocking waiting for file lock" "$log" 2>/dev/null; then
+            deadlock=1
+            pkill -9 -P "$cpid" 2>/dev/null || true
+            kill -9 "$cpid" 2>/dev/null || true
+            break
+        fi
+        sleep 5; waited=$(( waited + 5 ))
+    done
+    local rc=0
+    wait "$cpid" 2>/dev/null || rc=$?
+    kill "$tpid" 2>/dev/null || true
+    rm -f "$log"
+    if (( deadlock )); then return 42; fi
+    return "$rc"
+}
+
 if [[ "$PROFILE" == "dist" ]]; then
-    # `cargo build` (not `cargo rustc`): the plugin is already in RUSTFLAGS, and
-    # `cargo rustc` + `-Zbuild-std` self-deadlocks on the target lock. Obfuscation
-    # is scoped to this crate by policy.json, not by which crate cargo passes args to.
-    if ! cargo "${CARGO_ARGS[@]}" build --profile dist "${BUILD_STD_ARGS[@]}" --bin kerbside; then
-        echo; echo "BUILD FAILED" >&2; exit 1
+    if build_dist_once; then rc=0; else rc=$?; fi
+    if (( rc == 42 )); then
+        echo >&2
+        echo "note: -Zbuild-std lock deadlock detected -- wiping target/$HOST_TRIPLE" >&2
+        echo "      for a clean std build and retrying once." >&2
+        rm -rf "target/$HOST_TRIPLE" "target/dist"
+        if build_dist_once; then rc=0; else rc=$?; fi
     fi
+    if (( rc != 0 )); then echo; echo "BUILD FAILED" >&2; exit 1; fi
 else
     if ! cargo "${CARGO_ARGS[@]}" build --profile "$PROFILE" "${BUILD_STD_ARGS[@]}"; then
         echo; echo "BUILD FAILED" >&2; exit 1
