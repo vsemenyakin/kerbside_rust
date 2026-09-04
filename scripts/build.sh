@@ -336,7 +336,7 @@ fi
 # dev and release deliberately do not harden away the first-party module tree;
 # only dist does. So allow first-party paths for those (the check still fails on
 # any absolute build-machine path), and demand them gone for dist.
-CHECK_ARGS=()
+CHECK_ARGS=("--profile" "$PROFILE")
 if [[ "$PROFILE" != "dist" ]]; then
     CHECK_ARGS+=("--allow-first-party")
 fi
