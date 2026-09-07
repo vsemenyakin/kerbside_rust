@@ -321,13 +321,19 @@ fi
 # it cannot run, rather than shipping an unsealed (sentinel-keyed) binary that
 # would itself produce garbage.
 if [[ "$PROFILE" == "dist" ]]; then
-    _seal_py="$(command -v python3 || command -v python || true)"
-    if [[ -z "$_seal_py" ]]; then
-        echo "REFUSING TO SHIP: python not found -- cannot seal $BINARY to its code." >&2
+    # The sealer is the crypt crate's `seal` bin (single source of truth for the
+    # constants and the .text hash -- it can never drift from the runtime). Build
+    # it in a CLEAN environment: it is a host build-tool and must NOT inherit the
+    # dist RUSTFLAGS (OLLVM plugin via the workspace wrapper, -Zlocation-detail),
+    # which would obfuscate/slow it for no reason. Page size is the deployment
+    # target's (RPi5 = 16384); override with SEAL_PAGE_SIZE.
+    SEAL_PAGE_SIZE="${SEAL_PAGE_SIZE:-16384}"
+    if ! env -u RUSTFLAGS -u RUSTC_WORKSPACE_WRAPPER cargo build -q -p crypt --bin seal; then
+        echo "REFUSING TO SHIP: could not build the crypt seal tool." >&2
         exit 1
     fi
-    if ! "$_seal_py" tools/patch_integrity.py "$BINARY"; then
-        echo "REFUSING TO SHIP: could not seal $BINARY (patch_integrity failed)." >&2
+    if ! ./target/debug/seal "$BINARY" --page-size "$SEAL_PAGE_SIZE"; then
+        echo "REFUSING TO SHIP: could not seal $BINARY." >&2
         exit 1
     fi
 fi

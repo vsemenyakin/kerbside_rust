@@ -1,0 +1,24 @@
+[package]
+name = "crypt"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Inline constant/string obfuscation with an optional code-integrity-bound decode key."
+license = "MIT"
+
+[features]
+# Bind the decode key to a hardware probe and a hash of the process's own .text,
+# so patched or emulated code decodes constants to garbage. Linux/ELF only; a
+# no-op elsewhere. The binary must be sealed post-build with the `seal` tool.
+self-integrity = []
+# Make `obfstr_err!` erase its message to "" (for a shipped build) instead of
+# encrypting it with obfstr (for a debuggable build).
+redact = []
+
+[dependencies]
+# Used by obfstr_err! when NOT redacting.
+obfstr = "0.4"
+
+[[bin]]
+name = "seal"
+path = "src/bin/seal.rs"

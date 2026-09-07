@@ -23,6 +23,10 @@
 
 pub mod config;
 pub mod crypt;
+// Re-export the crypt macros at the crate root so `crate::encf!`, `crate::enci!`
+// and `crate::obfstr_err!` (and `kerbside::obfstr_err!` from the bins) keep
+// resolving after the move to the standalone `crypt` crate.
+pub use ::crypt::{encf, enci, obfstr_err};
 pub mod consumers;
 pub mod detect;
 pub mod enforce;

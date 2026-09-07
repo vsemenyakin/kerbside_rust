@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/crypt"]
+
 [package]
 name = "kerbside"
 version = "0.1.0"
@@ -32,8 +35,9 @@ introspection = []
 # TracerPid check, so a non-root reverse engineer cannot `gdb -p` / `gcore` the
 # running process (the primary technique every RE report in this project relied
 # on). Off by default so dev, release and the test suite stay freely debuggable;
-# scripts/build.sh turns it on for `dist` (--features anti-tamper).
-anti-tamper = []
+# scripts/build.sh turns it on for `dist` (--features anti-tamper). It enables the
+# crypt crate's self-integrity decode key and its message redaction.
+anti-tamper = ["crypt/self-integrity", "crypt/redact"]
 
 # Overlay video and image codecs: `--overlay` mp4 output and make_clip's PNG
 # export. A feature because videoio/imgcodecs pull in OpenCV's FFmpeg / GStreamer
@@ -45,6 +49,10 @@ anti-tamper = []
 overlay = ["opencv/videoio", "opencv/imgcodecs"]
 
 [dependencies]
+# In-repo crate: inline constant/string obfuscation + the self-integrity decode
+# key (see crates/crypt). kerbside's `anti-tamper` feature enables its
+# `self-integrity` and `redact` features.
+crypt = { path = "crates/crypt" }
 # The same native libraries the Python calls. This is the point of the port:
 # roughly three quarters of the frame is already inside these two, and that
 # share costs exactly the same from Rust. Swapping either for a pure-Rust

@@ -120,7 +120,8 @@ CLUSTERS = [
 # --------------------------------------------------------------------------
 # Category 9: the integrity seal (positive check). The sentinel must be GONE in a
 # sealed dist binary -- if it survives, patch_integrity.py did not run and the
-# binary would itself decode its constants to garbage. Must match src/crypt.rs.
+# binary would itself decode its constants to garbage. Must match
+# crates/crypt/src/lib.rs (crypt::SALT2_SENTINEL).
 # --------------------------------------------------------------------------
 SALT2_SENTINEL = 0xA1B2C3D4E5F60718
 
