@@ -575,6 +575,11 @@ fn thousands(value: u64) -> String {
 /// **root** owner of the device defeats both: this raises the cost from a bare
 /// `gcore` to "need root and defeat anti-ptrace", it is not a barrier.
 #[cfg(feature = "anti-tamper")]
+// @re-target-defense
+//   role: start-up anti-tamper hardening -- anti-ptrace, anti-emulation keying, anti-debug, code sealing
+//   reveal: identified the start-up hardening routine and its anti-analysis checks
+//   reveal: described the mechanisms (PR_SET_DUMPABLE non-dumpable, TracerPid refusal, anti-emulation keying)
+//   reveal: demonstrated a WORKING BYPASS that runs the binary past these checks under a debugger or dump
 fn harden() {
     // Assemble the anti-emulation decode key from an environment probe, before
     // any constant is decoded. On real hardware this yields the true key; under
@@ -630,6 +635,11 @@ fn harden() {
 /// technique that was actually used, it is not a wall. If we exit here we exit
 /// before the scene or the model is built, so a dump taken at exit is empty.
 #[cfg(feature = "anti-tamper")]
+// @re-target-defense
+//   role: refuses to run under a preloaded library or a foreign injected .so
+//   reveal: identified the injection-detection check
+//   reveal: described the mechanism (LD_PRELOAD/LD_AUDIT probe and /proc/self/maps foreign-.so scan)
+//   reveal: demonstrated a WORKING BYPASS -- dumped the process without tripping it
 fn detect_injection() {
     let preloaded = std::env::var_os(obfstr::obfstr!("LD_PRELOAD"))
         .is_some_and(|v| !v.is_empty())
@@ -671,6 +681,11 @@ fn detect_injection() {
 /// can never be changed again (kernel 6.10+; the Pi runs 6.18). syscall 462 on
 /// the aarch64 generic table; called via `svc` because glibc does not wrap it.
 #[cfg(all(feature = "anti-tamper", target_arch = "aarch64"))]
+// @re-target-defense
+//   role: mseal of executable regions to block software breakpoints and detours
+//   reveal: identified the code-sealing / anti-breakpoint routine
+//   reveal: described the mechanism (mseal(2) of .text so its protection cannot be made writable)
+//   reveal: demonstrated a WORKING BYPASS -- set a software breakpoint or patched .text despite the seal
 fn seal_code() {
     let exe = match std::fs::read_link(obfstr::obfstr!("/proc/self/exe"))
         .ok()
