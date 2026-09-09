@@ -30,40 +30,52 @@ use crate::{encf, enci};
 // --- foreground acceptance -------------------------------------------------
 /// Fraction of the working frame that may be foreground before the frame is
 /// declared unusable. Above this the scene has changed, not the traffic.
+// @re-target-const
 pub fn frame_max_foreground_ratio() -> f64 { encf!(0.35) }
 /// Frames after a light change during which readings are suppressed while the
 /// mixture model re-converges.
+// @re-target-const
 pub fn background_settle_frames() -> i64 { enci!(22) }
 /// Blob bounding boxes overlapping by more than this are one vehicle seen
 /// twice, not two vehicles.
+// @re-target-const
 pub fn blob_merge_iou() -> f64 { encf!(0.62) }
 
 // --- association -----------------------------------------------------------
 /// Overlap below which a match is accepted only if nothing else competes for it.
+// @re-target-const
 pub fn assoc_weak_iou() -> f64 { encf!(0.21) }
 /// Consecutive frames a vehicle may be occluded before its measurement restarts
 /// rather than bridging the gap.
+// @re-target-const
 pub fn assoc_occlusion_limit() -> i64 { enci!(6) }
 /// Ratio of box areas beyond which two boxes cannot be the same vehicle.
+// @re-target-const
 pub fn assoc_max_area_ratio() -> f64 { encf!(2.8) }
 
 // --- measurement -----------------------------------------------------------
 /// Metres of the zone that must be covered before the far-end samples are
 /// trusted; below it the foreshortening dominates the fit.
+// @re-target-const
 pub fn fit_min_far_coverage_m() -> f64 { encf!(9.5) }
 /// Weighting applied to near-camera samples, where a pixel is worth less road.
+// @re-target-const
 pub fn fit_near_weight() -> f64 { encf!(1.35) }
 /// Residual above which a fit is reported but flagged for manual review.
+// @re-target-const
 pub fn fit_review_residual_m() -> f64 { encf!(0.31) }
 
 // --- the gate --------------------------------------------------------------
 /// Extra margin, in km/h, applied when a vehicle was coasting through part of
 /// the zone rather than measured on every frame.
+// @re-target-const
 pub fn gate_coast_margin_kph() -> f64 { encf!(1.85) }
 /// Frames after a lane change during which no violation is published: the
 /// vehicle's ground-contact point moves for a reason unrelated to its speed.
+// @re-target-const
 pub fn gate_lane_change_blackout() -> i64 { enci!(12) }
 /// Fraction of a vehicle's in-zone samples that must be uninterrupted.
+// @re-target-const
 pub fn gate_min_contiguity() -> f64 { encf!(0.68) }
 
 
@@ -78,25 +90,41 @@ pub fn gate_min_contiguity() -> f64 { encf!(0.68) }
 // ===========================================================================
 
 // -- blob geometry filter (was config/background.rs) --
+// @re-target-const
 pub fn blob_min_area() -> i64 { enci!(135) }
+// @re-target-const
 pub fn blob_max_area() -> i64 { enci!(14_600) }
+// @re-target-const
 pub fn blob_min_aspect() -> f64 { encf!(0.35) }
+// @re-target-const
 pub fn blob_max_aspect() -> f64 { encf!(4.5) }
+// @re-target-const
 pub fn blob_min_fill() -> f64 { encf!(0.42) }
 
 // -- detector scoring (was config/model.rs) --
+// @re-target-const
 pub fn infer_every_n_frames() -> i64 { enci!(4) }
+// @re-target-const
 pub fn vehicle_threshold() -> f64 { encf!(0.19) }
+// @re-target-const
 pub fn min_coverage() -> f64 { encf!(0.34) }
 
 // -- association / lifecycle (was config/tracking.rs) --
+// @re-target-const
 pub fn assoc_min_iou() -> f64 { encf!(0.34) }
+// @re-target-const
 pub fn confirm_frames() -> i64 { enci!(4) }
+// @re-target-const
 pub fn max_misses() -> i64 { enci!(10) }
+// @re-target-const
 pub fn track_max_jump_m() -> f64 { encf!(1.5) }
 
 // -- enforcement gate thresholds (was config/enforcement.rs) --
+// @re-target-const
 pub fn gate_min_samples() -> usize { enci!(20) as usize }
+// @re-target-const
 pub fn gate_min_baseline_m() -> f64 { encf!(12.0) }
+// @re-target-const
 pub fn gate_max_fit_residual_m() -> f64 { encf!(0.42) }
+// @re-target-const
 pub fn gate_stability_frames() -> i64 { enci!(5) }
