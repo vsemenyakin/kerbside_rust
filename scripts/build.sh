@@ -201,6 +201,16 @@ if [[ "$PROFILE" == "dist" ]]; then
     echo "  --features anti-tamper                    (non-dumpable + TracerPid refusal + anti-emulation decode key)"
     echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
     echo "  --target $HOST_TRIPLE"
+
+    # Fresh random obfuscation key K for this shipped build (crates/crypt/build.rs
+    # reads CRYPT_K). Kills the recognisable golden-ratio magic number, and makes
+    # two shipped copies use different keys so analysis cannot be reused. Set once,
+    # BEFORE both the program build and the seal-tool build, so the two agree.
+    if [[ -z "${CRYPT_K:-}" ]]; then
+        CRYPT_K="0x$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+        export CRYPT_K
+    fi
+    echo "  CRYPT_K set (random per build)"
 fi
 
 echo

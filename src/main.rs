@@ -586,6 +586,9 @@ fn harden() {
     // an emulator that stubs the probe (or never runs start-up) it comes out
     // wrong, so every `encf!`/`enci!` decodes to garbage. See `crypt::keying`.
     kerbside::crypt::init_keying();
+    // Materialise decoy sealed constants (behaviour-neutral): they pad .text with
+    // plausible fake thresholds so recovered per-site values cannot be told apart.
+    kerbside::decoys::seed_decoys();
     // Refuse if a library was preloaded into us. The observed dumps came from an
     // in-process LD_PRELOAD shim (a memory dumper + a /proc/self/status faker),
     // which anti-ptrace cannot stop because it never traces. Catch the injection

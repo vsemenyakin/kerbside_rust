@@ -27,6 +27,9 @@ pub mod crypt;
 // and `crate::obfstr_err!` (and `kerbside::obfstr_err!` from the bins) keep
 // resolving after the move to the standalone `crypt` crate.
 pub use ::crypt::{encf, enci, obfstr_err};
+// Decoy sealed constants for the shipped build -- see decoys.rs. Behaviour-neutral.
+#[cfg(feature = "anti-tamper")]
+pub mod decoys;
 pub mod consumers;
 pub mod detect;
 pub mod enforce;

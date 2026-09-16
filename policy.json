@@ -6,6 +6,6 @@
     },
     "policies": [
         { "module": ".*", "func": ".*(kerbside|crypt).*", "policy": "rest" },
-        { "module": ".*", "func": ".*kerbside.*(speed|gate|associat|pipeline|geometry|homograph|contact|blob|score|calib|tuning|fit|zone|survey).*", "policy": "crown" }
+        { "module": ".*", "func": ".*kerbside.*(speed|gate|associat|pipeline|geometry|homograph|contact|blob|score|calib|tuning|fit|zone|survey|decoy).*", "policy": "crown" }
     ]
 }

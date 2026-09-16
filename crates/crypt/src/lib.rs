@@ -29,8 +29,46 @@
 //! Honest limits: this defeats the offline emulator and the binary-only patcher;
 //! it does not beat a live-root RAM dump, and it is an arms race.
 
-/// The compile-time XOR key: ciphertext is `plaintext ^ K`.
-pub const K: u64 = 0x9E3779B97F4A7C15;
+/// Fixed non-magic default key for dev/test builds (when `CRYPT_K` is unset).
+const DEFAULT_K: u64 = 0x3063_2F5A_7B1C_9E4D;
+
+/// Parse a `u64` from a decimal or `0x`-prefixed hex string, at compile time.
+/// `u64::from_str_radix` is not `const`, so parse by hand. A bad digit is a
+/// compile error (const `panic!`), never silent garbage.
+const fn parse_k(s: &str) -> u64 {
+    let b = s.as_bytes();
+    let (mut i, base) = if b.len() >= 2 && b[0] == b'0' && (b[1] | 32) == b'x' {
+        (2usize, 16u64)
+    } else {
+        (0usize, 10u64)
+    };
+    let mut v: u64 = 0;
+    while i < b.len() {
+        let c = b[i];
+        let d = match c {
+            b'0'..=b'9' => (c - b'0') as u64,
+            b'a'..=b'f' => (c - b'a' + 10) as u64,
+            b'A'..=b'F' => (c - b'A' + 10) as u64,
+            b'_' => {
+                i += 1;
+                continue;
+            }
+            _ => panic!("CRYPT_K: invalid digit"),
+        };
+        v = v.wrapping_mul(base).wrapping_add(d);
+        i += 1;
+    }
+    v
+}
+
+/// The compile-time XOR key: ciphertext is `plaintext ^ K`. Baked from the
+/// `CRYPT_K` env var **at compile time** (see scripts/build.sh) so a shipped build
+/// uses a fresh random value rather than a recognisable magic constant; a dev
+/// build with `CRYPT_K` unset falls back to a fixed non-magic default.
+pub const K: u64 = match option_env!("CRYPT_K") {
+    Some(s) => parse_k(s),
+    None => DEFAULT_K,
+};
 
 /// Placeholder the `seal` tool overwrites in a shipped binary. Public so the tool
 /// finds it by value; see [`crate::fnv1a`] and `src/bin/seal.rs`.
