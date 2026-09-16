@@ -79,15 +79,47 @@ pub use keying::{init as init_keying, key as __key};
 
 // -- macros -----------------------------------------------------------------
 
+/// Per-call-site salt, from the invocation's line and column. Diversifies the key
+/// per site so that one recovered global key does not decrypt every constant with
+/// a single XOR. A **macro**, not a fn, so it expands to a compile-time constant
+/// expression with no call to recognise.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __site_salt {
+    ($line:expr, $col:expr) => {
+        (($line as u64).wrapping_mul(0xff51_afd7_ed55_8ccd)
+            ^ ($col as u64).wrapping_mul(0xc4ce_b9fe_1a85_ec53)
+            ^ 0x2545_f491_4f6c_dd1d)
+    };
+}
+
+/// Non-linear per-site key mix: rotate the key by a site-dependent amount, then
+/// fold in the salt. Non-linear over XOR, so the effective key differs at every
+/// site and cannot be collapsed to one global key by a linear scan.
+///
+/// A **macro**, not a fn: it expands textually at every use site, so there is no
+/// shared `bl`-called decoder to fingerprint, and MBA obfuscates each expanded
+/// copy independently. `$salt` is always a `const`, so its double use is free of
+/// side effects.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __mix {
+    ($key:expr, $salt:expr) => {
+        (($key).rotate_left((($salt) & 63) as u32) ^ ($salt).wrapping_mul(0x9ddf_ea08_eb38_2d69))
+    };
+}
+
 /// Encrypt an `f64` literal at compile time; decode it **inline** at run time.
 ///
 /// `encf!(1.35)` reads as the value in source but ships only ciphertext, decoded
-/// against [`__key`] behind a `black_box` so it cannot be constant-folded.
+/// against a *per-site* key ([`__mix`] of [`__key`] and a site salt) behind a
+/// `black_box` so it cannot be constant-folded.
 #[macro_export]
 macro_rules! encf {
     ($v:expr) => {{
-        const ENC: u64 = ($v as f64).to_bits() ^ $crate::K;
-        f64::from_bits(ENC ^ $crate::__key())
+        const SALT: u64 = $crate::__site_salt!(line!(), column!());
+        const ENC: u64 = ($v as f64).to_bits() ^ $crate::__mix!($crate::K, SALT);
+        f64::from_bits(ENC ^ $crate::__mix!($crate::__key(), SALT))
     }};
 }
 
@@ -95,8 +127,9 @@ macro_rules! encf {
 #[macro_export]
 macro_rules! enci {
     ($v:expr) => {{
-        const ENC: u64 = ($v as i64 as u64) ^ $crate::K;
-        (ENC ^ $crate::__key()) as i64
+        const SALT: u64 = $crate::__site_salt!(line!(), column!());
+        const ENC: u64 = ($v as i64 as u64) ^ $crate::__mix!($crate::K, SALT);
+        (ENC ^ $crate::__mix!($crate::__key(), SALT)) as i64
     }};
 }
 

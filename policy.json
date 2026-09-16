@@ -1,7 +1,7 @@
 {
     "globals": {},
     "policy_map": {
-        "crown": { "enable-fla": true,  "enable-bcf": true, "enable-sub": true, "enable-mba": false },
+        "crown": { "enable-fla": true,  "enable-bcf": true, "enable-sub": true, "enable-mba": true },
         "rest":  { "enable-fla": false, "enable-bcf": true, "enable-sub": true, "enable-mba": false }
     },
     "policies": [
