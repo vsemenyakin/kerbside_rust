@@ -95,7 +95,10 @@ CLUSTER_ANTI_TAMPER = [
 ]
 #: The purpose of the program -- what the whole project denies a reverse engineer.
 CLUSTER_DOMAIN = [
-    b"kerbside", b"km/h", b"kph", b"speed_kph", b"violation", b"enforce",
+    # Distinctive, multi-byte terms only. A short token like bare "kph" (3 bytes)
+    # collides by chance in a multi-MB binary (~25% likely), so use "km/h" and
+    # "speed_kph" for that concept instead.
+    b"kerbside", b"km/h", b"speed_kph", b"violation", b"enforce",
     b"homograph", b"calibrat", b"radar", b"roadside", b"vehicle", b"licence plate",
     b"number plate",
 ]
