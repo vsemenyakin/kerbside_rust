@@ -5,6 +5,18 @@
 //! the intended hardware. There is no reference page size compiled in: the runtime
 //! uses the *live* `getpagesize()`, and the seal tool takes the target page size as
 //! a parameter -- so one compiled binary can be sealed for several page sizes.
+//!
+//! **The assembled key is never stored.** An earlier version derived the whole
+//! key once and kept it in a single `static RUNTIME_KEY`, written by one `stlr`.
+//! That is exactly the chokepoint the round-11 live-debugger attack broke on: a
+//! hardware breakpoint on that one instruction read the entire key out of a
+//! register. Here [`init`] stores only the two runtime-derived *shares* (the page
+//! probe and the `.text` hash) in separate words, and [`key`] recombines them with
+//! the patched `SALT2` **inline at every decode site**. There is no single global
+//! equal to the key and no single instruction that assembles it; a passive reader
+//! must recover shares from more than one place (or reverse a decode site under
+//! MBA) rather than snapshot one `stlr`. The returned value is bit-identical to the
+//! old `RUNTIME_KEY`, so behaviour (and the output oracle) is unchanged.
 
 use super::{fnv1a, SALT2_SENTINEL};
 use core::hint::black_box;
@@ -17,9 +29,16 @@ use core::sync::atomic::{AtomicU64, Ordering};
 #[used]
 static SALT2: AtomicU64 = AtomicU64::new(SALT2_SENTINEL);
 
-/// Derived once by [`init`]; zero until then, so a decode that runs before
-/// start-up (an emulator sweeping a block in isolation) gets a wrong key.
-static RUNTIME_KEY: AtomicU64 = AtomicU64::new(0);
+// The two runtime-derived key shares, stored *separately* so no word ever holds
+// the assembled key. Zero until [`init`] runs: before start-up the recombination
+// yields `SALT2` (= page ^ text_hash ^ K, not K), so an early decode -- an
+// emulator sweeping a block in isolation -- still gets a wrong key and fails
+// closed. `#[used]` keeps each a real word the store cannot be optimised into a
+// single fused global.
+#[used]
+static PROBE_SHARE: AtomicU64 = AtomicU64::new(0);
+#[used]
+static TEXT_SHARE: AtomicU64 = AtomicU64::new(0);
 
 extern "C" {
     fn getpagesize() -> i32;
@@ -99,15 +118,29 @@ fn text_hash() -> u64 {
 pub fn init() {
     let probe = unsafe { getpagesize() } as u32 as u64;
     let th = text_hash();
-    // Volatile read of the raw storage: the tool patches these bytes on disk
-    // directly, and volatile forbids the compiler from assuming the value.
-    let salt2 = unsafe { core::ptr::read_volatile(SALT2.as_ptr()) };
-    RUNTIME_KEY.store(probe ^ th ^ salt2, Ordering::Release);
+    // Store the two shares separately -- never their XOR, and never combined with
+    // SALT2. Neither stored word equals the decode key, so there is no single
+    // assembled-key store for a hardware breakpoint to snapshot (the round-11
+    // attack read the key from exactly such a store). SALT2 is not touched here:
+    // it stays the patched word the `seal` tool wrote, and joins the shares only
+    // transiently inside `key`, inline at each decode site.
+    PROBE_SHARE.store(probe, Ordering::Release);
+    TEXT_SHARE.store(th, Ordering::Release);
 }
 
 /// The decode key: `K` on real hardware running unpatched code once [`init`] has
 /// run; garbage under an emulator, if the code was patched, or before start-up.
+///
+/// Recombines the shares with `SALT2` *here*, so with `#[inline(always)]` the
+/// assembly happens at each decode site rather than in one place. The value is
+/// bit-identical to the old single `RUNTIME_KEY` (`probe ^ text_hash ^ SALT2`).
 #[inline(always)]
 pub fn key() -> u64 {
-    black_box(RUNTIME_KEY.load(Ordering::Acquire))
+    // Volatile reads of the raw storage: SALT2 is patched on disk by the tool, and
+    // volatile forbids the compiler from assuming any of the three values or from
+    // fusing the two shares into one hoisted global.
+    let probe = unsafe { core::ptr::read_volatile(PROBE_SHARE.as_ptr()) };
+    let th = unsafe { core::ptr::read_volatile(TEXT_SHARE.as_ptr()) };
+    let salt2 = unsafe { core::ptr::read_volatile(SALT2.as_ptr()) };
+    black_box(probe ^ th ^ salt2)
 }

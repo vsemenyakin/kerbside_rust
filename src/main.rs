@@ -581,14 +581,14 @@ fn thousands(value: u64) -> String {
 //   reveal: described the mechanisms (PR_SET_DUMPABLE non-dumpable, TracerPid refusal, anti-emulation keying)
 //   reveal: demonstrated a WORKING BYPASS that runs the binary past these checks under a debugger or dump
 fn harden() {
-    // Assemble the anti-emulation decode key from an environment probe, before
-    // any constant is decoded. On real hardware this yields the true key; under
-    // an emulator that stubs the probe (or never runs start-up) it comes out
-    // wrong, so every `encf!`/`enci!` decodes to garbage. See `crypt::keying`.
-    kerbside::crypt::init_keying();
-    // Materialise decoy sealed constants (behaviour-neutral): they pad .text with
-    // plausible fake thresholds so recovered per-site values cannot be told apart.
-    kerbside::decoys::seed_decoys();
+    // ORDER MATTERS. The debugger/injection gates run *first*, before any key
+    // material is assembled. The round-11 attack (root SSH on the Pi) put a
+    // hardware breakpoint on the single `stlr` that stored the assembled decode
+    // key and read it live from a register -- and it reached that store because
+    // `init_keying()` used to run *before* the `TracerPid` refusal. Now a debugger
+    // attached at start is rejected here, before the key exists at all; and there
+    // is no longer a single assembled-key store to break on (see `crypt::keying`).
+
     // Refuse if a library was preloaded into us. The observed dumps came from an
     // in-process LD_PRELOAD shim (a memory dumper + a /proc/self/status faker),
     // which anti-ptrace cannot stop because it never traces. Catch the injection
@@ -612,7 +612,8 @@ fn harden() {
         }
     }
     // Already traced at start? Refuse -- quietly, with no anti-debug banner to
-    // steer around.
+    // steer around. This gate now runs *before* the key is derived, so a debugger
+    // attached at start never sees a key-assembly instruction to break on.
     if let Ok(status) = std::fs::read_to_string(obfstr::obfstr!("/proc/self/status")) {
         for line in status.lines() {
             if let Some(rest) = line.strip_prefix(obfstr::obfstr!("TracerPid:")) {
@@ -622,6 +623,17 @@ fn harden() {
             }
         }
     }
+    // Only now assemble the anti-emulation decode key. On real hardware this
+    // yields the true key; under an emulator that stubs the probe (or never runs
+    // start-up) it comes out wrong, so every `encf!`/`enci!` decodes to garbage.
+    // The key is no longer stored as one assembled word: `key()` recombines its
+    // shares inline at each decode site, so there is no single global or `stlr`
+    // for a hardware breakpoint to snapshot. See `crypt::keying`.
+    kerbside::crypt::init_keying();
+    // Materialise decoy sealed constants (behaviour-neutral): they pad .text with
+    // plausible fake thresholds so recovered per-site values cannot be told apart.
+    // Must follow `init_keying` -- the decoys decode through `__key()` too.
+    kerbside::decoys::seed_decoys();
     // Seal our own code last, once every relocation is done. After this the
     // `.text` pages cannot be made writable, so a software breakpoint (which
     // rewrites an instruction) cannot be inserted and the code cannot be
