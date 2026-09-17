@@ -594,6 +594,29 @@ fn harden() {
     // which anti-ptrace cannot stop because it never traces. Catch the injection
     // itself instead. See `detect_injection` for the (honest) limits.
     detect_injection();
+    // Already traced at start? Refuse -- quietly, with no anti-debug banner to
+    // steer around. This `/proc` read runs *before* we install our own tracer
+    // below (which would itself set TracerPid to our sentinel child), so here a
+    // non-zero TracerPid can only be an external debugger attached at start.
+    if let Ok(status) = std::fs::read_to_string(obfstr::obfstr!("/proc/self/status")) {
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix(obfstr::obfstr!("TracerPid:")) {
+                if rest.trim() != "0" {
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    // Self-ptrace: fork a sentinel child that PTRACE_SEIZEs us and *stays* attached
+    // for the whole run. The kernel permits one tracer per process, so once our
+    // child holds that slot no debugger can attach -- at start or mid-run. If a
+    // debugger already holds it (the round-11 attack launched us under gdb) the
+    // seize fails and the child SIGKILLs us. A mutual watchdog links our lives: if
+    // the child is killed (to free the slot) while we are still running, we exit.
+    // This is the *syscall*-level guarantee the `/proc` read above cannot be. It
+    // runs *before* PR_SET_DUMPABLE 0 -- a non-dumpable process denies a same-uid
+    // ptrace, which would make the clean-run seize false-positive.
+    anti_debug_ptrace();
     // PR_SET_DUMPABLE (4) = 0 (SUID_DUMP_DISABLE): drop dumpability so a non-root
     // ptrace/gcore of this process is denied by the kernel.
     extern "C" {
@@ -609,18 +632,6 @@ fn harden() {
         // is a cost step against exactly the hook seen, not a wall.
         if prctl(3, 0, 0, 0, 0) != 0 {
             std::process::exit(1);
-        }
-    }
-    // Already traced at start? Refuse -- quietly, with no anti-debug banner to
-    // steer around. This gate now runs *before* the key is derived, so a debugger
-    // attached at start never sees a key-assembly instruction to break on.
-    if let Ok(status) = std::fs::read_to_string(obfstr::obfstr!("/proc/self/status")) {
-        for line in status.lines() {
-            if let Some(rest) = line.strip_prefix(obfstr::obfstr!("TracerPid:")) {
-                if rest.trim() != "0" {
-                    std::process::exit(1);
-                }
-            }
         }
     }
     // Only now assemble the anti-emulation decode key. On real hardware this
@@ -640,6 +651,148 @@ fn harden() {
     // detoured -- exactly the step the reverse-engineering report was blocked on.
     seal_code();
 }
+
+/// Self-ptrace anti-debug: fork a sentinel child that `PTRACE_SEIZE`s us and holds
+/// the one tracer slot for the whole run, with a mutual life-link.
+///
+/// The kernel permits exactly one tracer per process. The child seizes us, so no
+/// debugger can attach afterwards -- at start *or* mid-run. `PTRACE_SEIZE` (unlike
+/// `PTRACE_ATTACH`) does not stop us, so it never group-stops the pipeline threads;
+/// a `sync` pipe lets the child confirm the seize before we touch any key material,
+/// and if a debugger already holds the slot the seize fails and the child `SIGKILL`s
+/// us before we return. This is the *syscall*-level guarantee the `/proc` TracerPid
+/// read is not: an `LD_PRELOAD` that fakes `/proc` does not fool the kernel's tracer
+/// bookkeeping.
+///
+/// Mutual watchdog: to free the slot an attacker must kill the child. A watchdog
+/// thread blocks on the child; if it dies while we are still running (`SHUTTING_DOWN`
+/// is false) we exit. The child, being our tracer, likewise sees us exit and leaves.
+/// On a normal exit the child dies only after `main` has set `SHUTTING_DOWN`, so the
+/// watchdog does not fire during teardown.
+///
+/// Honest limit: root can still `SIGSTOP`/kill both ends, or read our memory from
+/// the kernel side (`/proc/kcore`, a module) -- this raises cost against non-root and
+/// the automated `gdb` path and makes a root attack noisier; it is not a wall.
+#[cfg(all(feature = "anti-tamper", target_os = "linux"))]
+// @re-target-defense
+//   role: self-ptrace anti-debugger -- a forked sentinel child SEIZEs and holds the one tracer slot for the whole run so no debugger can attach; a mutual watchdog kills the process if the sentinel is removed
+//   reveal: identified the self-ptrace / sentinel-tracer anti-debug routine
+//   reveal: described the mechanism (child PTRACE_SEIZEs the parent and stays attached; seize failure means already traced, so the process is SIGKILLed; a watchdog exits the process if the sentinel child is killed)
+//   reveal: demonstrated a WORKING BYPASS -- ran the binary to completion under a debugger, or attached one mid-run, despite it
+fn anti_debug_ptrace() {
+    const PTRACE_CONT: i32 = 7;
+    const PTRACE_SEIZE: i32 = 0x4206;
+    const PR_SET_PTRACER: i32 = 0x5961_6d61;
+    const SIGKILL: i32 = 9;
+    const SIGTRAP: i32 = 5;
+    const SIGSTOP: i32 = 19;
+    const WALL: i32 = 0x4000_0000;
+    extern "C" {
+        fn fork() -> i32;
+        fn getppid() -> i32;
+        fn ptrace(request: i32, pid: i32, addr: usize, data: usize) -> i64;
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+        fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
+        fn kill(pid: i32, sig: i32) -> i32;
+        fn pipe(fds: *mut i32) -> i32;
+        fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+        fn close(fd: i32) -> i32;
+        fn _exit(code: i32) -> !;
+    }
+    unsafe {
+        // `go`: parent -> child, "you may seize now" (after PR_SET_PTRACER).
+        // `ok`: child -> parent, "seize succeeded" (so we do not race ahead into
+        // key material before the slot is ours; if seize failed we are already
+        // SIGKILLed and never read it).
+        let mut go = [0i32; 2];
+        let mut ok = [0i32; 2];
+        if pipe(go.as_mut_ptr()) != 0 {
+            return; // cannot sync; fail open rather than break a legitimate run
+        }
+        if pipe(ok.as_mut_ptr()) != 0 {
+            close(go[0]);
+            close(go[1]);
+            return;
+        }
+        let (go_r, go_w) = (go[0], go[1]);
+        let (ok_r, ok_w) = (ok[0], ok[1]);
+        let child = fork();
+        if child < 0 {
+            close(go_r);
+            close(go_w);
+            close(ok_r);
+            close(ok_w);
+            return; // fork failed (resource pressure); fail open
+        }
+        if child == 0 {
+            // ---- child: the sentinel tracer ----
+            close(go_w);
+            close(ok_r);
+            let mut b = [0u8; 1];
+            let _ = read(go_r, b.as_mut_ptr(), 1); // wait until we are permitted
+            close(go_r);
+            let parent = getppid();
+            if ptrace(PTRACE_SEIZE, parent, 0, 0) != 0 {
+                // The one tracer slot is already taken -> a debugger is attached.
+                kill(parent, SIGKILL);
+                _exit(1);
+            }
+            let _ = write(ok_w, b"x".as_ptr(), 1); // seize confirmed
+            close(ok_w);
+            // Stay attached for the whole run, servicing any signal-stops so the
+            // parent keeps its normal signal semantics. In a clean, signal-free run
+            // this simply blocks until the parent exits.
+            let mut st = 0i32;
+            loop {
+                let r = waitpid(parent, &mut st as *mut i32, WALL);
+                if r < 0 {
+                    _exit(0);
+                }
+                if (st & 0x7f) != 0x7f {
+                    _exit(0); // WIFEXITED / WIFSIGNALED -> parent is gone
+                }
+                let sig = (st >> 8) & 0xff; // WSTOPSIG
+                let fwd = if sig == SIGTRAP || sig == SIGSTOP { 0 } else { sig };
+                if ptrace(PTRACE_CONT, parent, 0, fwd as usize) != 0 {
+                    _exit(0);
+                }
+            }
+        }
+        // ---- parent ----
+        // Permit the child as our ptracer (Yama; harmless where absent), release it,
+        // then block until it confirms the seize. If a debugger holds the slot the
+        // child SIGKILLs us and this read never returns.
+        prctl(PR_SET_PTRACER, child as u64, 0, 0, 0);
+        close(go_r);
+        close(ok_w);
+        let _ = write(go_w, b"x".as_ptr(), 1);
+        close(go_w);
+        let mut b = [0u8; 1];
+        let n = read(ok_r, b.as_mut_ptr(), 1);
+        close(ok_r);
+        if n != 1 {
+            return; // child gone without seizing and without killing us; fail open
+        }
+        // Mutual watchdog: block on the sentinel's death. If it dies while we are
+        // still running (an attacker killed it to free the tracer slot), refuse.
+        std::thread::spawn(move || {
+            let mut st = 0i32;
+            loop {
+                let r = unsafe { waitpid(child, &mut st as *mut i32, 0) };
+                if r == child || r < 0 {
+                    break;
+                }
+            }
+            if !SHUTTING_DOWN.load(core::sync::atomic::Ordering::SeqCst) {
+                std::process::exit(1);
+            }
+        });
+    }
+}
+
+#[cfg(all(feature = "anti-tamper", not(target_os = "linux")))]
+fn anti_debug_ptrace() {}
 
 /// Refuse to run under a preloaded library (the round-8 in-process dumper).
 ///
@@ -756,9 +909,21 @@ fn seal_code() {}
 #[inline]
 fn harden() {}
 
+/// Set true just before a *normal* exit, so the self-ptrace sentinel watchdog can
+/// tell "the sentinel died because we are shutting down" (do nothing) from "the
+/// sentinel was killed while we were running" (an attack -- refuse). See
+/// `anti_debug_ptrace`.
+#[cfg(feature = "anti-tamper")]
+static SHUTTING_DOWN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 fn main() -> ExitCode {
     harden();
-    match run() {
+    let result = run();
+    // Mark normal teardown before returning: from here the sentinel child may exit
+    // (it follows us) without the watchdog treating it as a tampering event.
+    #[cfg(feature = "anti-tamper")]
+    SHUTTING_DOWN.store(true, core::sync::atomic::Ordering::SeqCst);
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{}{message}", kerbside::obfstr_err!("kerbside: "));
