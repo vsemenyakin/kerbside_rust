@@ -171,6 +171,15 @@ macro_rules! enci {
     }};
 }
 
+/// Re-export of `obfstr`'s macro, so `obfstr_err!` can reach it through `$crate`
+/// from any downstream crate. Without this the macro expanded to `::obfstr::obfstr!`,
+/// which resolves in the *caller's* crate -- so every user had to add their own
+/// `obfstr` dependency (kerbside happened to have one, which hid the bug). Now the
+/// caller only needs to depend on `crypt`.
+#[cfg(not(feature = "redact"))]
+#[doc(hidden)]
+pub use ::obfstr::obfstr as __obfstr;
+
 /// An `obfstr!` for diagnostic strings that a shipped build drops entirely.
 ///
 /// Without `redact` this is `obfstr!` (the message is encrypted but still helps in
@@ -181,7 +190,7 @@ macro_rules! enci {
 #[macro_export]
 macro_rules! obfstr_err {
     ($s:literal) => {
-        ::obfstr::obfstr!($s)
+        $crate::__obfstr!($s)
     };
 }
 
