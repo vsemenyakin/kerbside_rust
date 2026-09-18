@@ -44,11 +44,15 @@
 crypt = { path = "crates/crypt" }
 ```
 
-> Если ваш проект — это workspace, добавьте крейт в члены workspace:
+> Добавьте крейт в члены workspace — это **обязательно**, если планируете уровень 3
+> (шаг `seal` выбирает пакет по имени: `cargo run -p crypt --bin seal`). Для
+> уровней 1–2 не требуется, но и не мешает:
 > ```toml
 > [workspace]
 > members = [".", "crates/crypt"]
 > ```
+> Если секции `[workspace]` нет, `crypt` остаётся лишь зависимостью по пути, и
+> `cargo … -p crypt` завершится ошибкой `package(s) crypt not found in workspace`.
 
 > Крейту нужен Rust **1.80+** (edition 2021). Проверить: `rustc --version`.
 
@@ -271,12 +275,23 @@ name = "myapp"
 version = "0.1.0"
 edition = "2021"
 
+# Нужно, чтобы шаг seal мог выбрать пакет по имени: cargo run -p crypt --bin seal
+[workspace]
+members = [".", "crates/crypt"]
+
 [dependencies]
 crypt = { path = "crates/crypt" }
 
 [features]
 harden = ["crypt/self-integrity", "crypt/redact"]
 ```
+
+> **`seal` работает только на Linux/ELF.** Уровень 3 (`self-integrity` + `seal`) —
+> для Linux-бинарей (PIE/ELF). На Windows/Mac `self-integrity` — no-op, «отпечатка»
+> `SALT2` в бинаре нет, а `seal` парсит именно ELF (на PE-`.exe` он выдаст
+> `not a 64-bit ELF`). Поэтому боевую сборку с `harden`/`seal` запускай **на Linux**
+> (в т.ч. кросс-таргет). На других ОС для разработки достаточно уровней 1–2 — они
+> кроссплатформенные и `seal` не требуют.
 
 **`src/main.rs`:**
 ```rust
