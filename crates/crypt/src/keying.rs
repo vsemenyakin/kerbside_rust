@@ -68,7 +68,7 @@ struct Phdr {
 /// auxiliary vector so the byte range matches what the file-side `seal` tool
 /// hashes. Returns 0 if the layout cannot be read -- which makes the key wrong and
 /// the binary fail closed, never open.
-// @re-target-defense
+// @re-target-defense ignore-for="dev,mixed"
 //   role: hashes the process's own .text so any code patch corrupts the decryption key
 //   reveal: identified the .text self-hashing routine that feeds the decode key
 //   reveal: described the mechanism (hashes own executable PT_LOAD segment via the auxv, so a patched or emulated .text yields a different hash and a wrong key)
@@ -110,7 +110,7 @@ fn text_hash() -> u64 {
 /// Probe the environment, hash our own code, and assemble the decode key.
 /// **Must run before any `encf!`/`enci!`.**
 #[inline(never)]
-// @re-target-defense
+// @re-target-defense ignore-for="dev,mixed"
 //   role: derives the constant-decryption key from page size, .text hash and a post-build salt -- binds decryption to unpatched code on real hardware
 //   reveal: identified the runtime key-derivation routine that gates all constant decryption
 //   reveal: described the mechanism (key = getpagesize XOR text_hash(.text) XOR SALT2; key is wrong under emulation, after any .text patch, or before init runs)

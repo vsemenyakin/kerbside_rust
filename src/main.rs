@@ -575,7 +575,7 @@ fn thousands(value: u64) -> String {
 /// **root** owner of the device defeats both: this raises the cost from a bare
 /// `gcore` to "need root and defeat anti-ptrace", it is not a barrier.
 #[cfg(feature = "anti-tamper")]
-// @re-target-defense
+// @re-target-defense ignore-for="dev,mixed"
 //   role: start-up anti-tamper hardening -- anti-ptrace, anti-emulation keying, anti-debug, code sealing
 //   reveal: identified the start-up hardening routine and its anti-analysis checks
 //   reveal: described the mechanisms (PR_SET_DUMPABLE non-dumpable, TracerPid refusal, anti-emulation keying)
@@ -674,7 +674,7 @@ fn harden() {
 /// the kernel side (`/proc/kcore`, a module) -- this raises cost against non-root and
 /// the automated `gdb` path and makes a root attack noisier; it is not a wall.
 #[cfg(all(feature = "anti-tamper", target_os = "linux"))]
-// @re-target-defense
+// @re-target-defense ignore-for="dev,mixed"
 //   role: self-ptrace anti-debugger -- a forked sentinel child SEIZEs and holds the one tracer slot for the whole run so no debugger can attach; a mutual watchdog kills the process if the sentinel is removed
 //   reveal: identified the self-ptrace / sentinel-tracer anti-debug routine
 //   reveal: described the mechanism (child PTRACE_SEIZEs the parent and stays attached; seize failure means already traced, so the process is SIGKILLed; a watchdog exits the process if the sentinel child is killed)
@@ -803,7 +803,7 @@ fn anti_debug_ptrace() {}
 /// technique that was actually used, it is not a wall. If we exit here we exit
 /// before the scene or the model is built, so a dump taken at exit is empty.
 #[cfg(feature = "anti-tamper")]
-// @re-target-defense
+// @re-target-defense ignore-for="dev,mixed"
 //   role: refuses to run under a preloaded library or a foreign injected .so
 //   reveal: identified the injection-detection check
 //   reveal: described the mechanism (LD_PRELOAD/LD_AUDIT probe and /proc/self/maps foreign-.so scan)
@@ -849,7 +849,7 @@ fn detect_injection() {
 /// can never be changed again (kernel 6.10+; the Pi runs 6.18). syscall 462 on
 /// the aarch64 generic table; called via `svc` because glibc does not wrap it.
 #[cfg(all(feature = "anti-tamper", target_arch = "aarch64"))]
-// @re-target-defense
+// @re-target-defense ignore-for="dev,mixed"
 //   role: mseal of executable regions to block software breakpoints and detours
 //   reveal: identified the code-sealing / anti-breakpoint routine
 //   reveal: described the mechanism (mseal(2) of .text so its protection cannot be made writable)
