@@ -215,6 +215,7 @@ impl Pipeline {
 
     // -- the frame -------------------------------------------------------
 
+    // @re-target-algo
     fn process_frame(&mut self, frame: RawFrame) -> Result<Arc<FrameOutput>, String> {
         let began = Instant::now();
         // ONE pull. Everything below receives this object by reference.
