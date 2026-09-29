@@ -7,9 +7,15 @@ description = "Inline constant/string obfuscation with an optional code-integrit
 license = "MIT"
 
 [features]
+# Turn `encf!`/`enci!` into real encryption (ciphertext + inline decode). Without
+# it they are the identity (the value passes straight through, no run-time cost),
+# so a build without this feature is a zero-overhead baseline for measuring what
+# the encryption costs. Off by default: opt in for a shipped build.
+encrypt-consts = []
 # Bind the decode key to a hardware probe and a hash of the process's own .text,
 # so patched or emulated code decodes constants to garbage. Linux/ELF only; a
 # no-op elsewhere. The binary must be sealed post-build with the `seal` tool.
+# Only meaningful together with `encrypt-consts` (it is the key that gates decode).
 self-integrity = []
 # Make `obfstr_err!` erase its message to "" (for a shipped build) instead of
 # encrypting it with obfstr (for a debuggable build).

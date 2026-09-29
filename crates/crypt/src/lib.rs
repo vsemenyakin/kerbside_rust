@@ -152,6 +152,14 @@ macro_rules! __mix {
 /// `encf!(1.35)` reads as the value in source but ships only ciphertext, decoded
 /// against a *per-site* key ([`__mix`] of [`__key`] and a site salt) behind a
 /// `black_box` so it cannot be constant-folded.
+///
+/// **Gated on the `encrypt-consts` feature.** Without it the macro is the
+/// **identity** -- `encf!(1.35)` expands to just `1.35`, with no ciphertext, no
+/// key, and no decode. The decoded value is the same either way, so behaviour
+/// (and the output oracle) is identical; the point is that a build *without*
+/// `encrypt-consts` carries none of the encryption's run-time cost, which makes
+/// it a clean zero-overhead baseline for measuring what the encryption costs.
+#[cfg(feature = "encrypt-consts")]
 #[macro_export]
 macro_rules! encf {
     ($v:expr) => {{
@@ -161,7 +169,18 @@ macro_rules! encf {
     }};
 }
 
+/// Identity variant (no `encrypt-consts`): the value passes straight through.
+#[cfg(not(feature = "encrypt-consts"))]
+#[macro_export]
+macro_rules! encf {
+    ($v:expr) => {
+        ($v as f64)
+    };
+}
+
 /// Encrypt an `i64` literal at compile time; decode it **inline** at run time.
+/// Gated on `encrypt-consts`; the identity variant below passes the value through.
+#[cfg(feature = "encrypt-consts")]
 #[macro_export]
 macro_rules! enci {
     ($v:expr) => {{
@@ -169,6 +188,15 @@ macro_rules! enci {
         const ENC: u64 = ($v as i64 as u64) ^ $crate::__mix!($crate::K, SALT);
         (ENC ^ $crate::__mix!($crate::__key(), SALT)) as i64
     }};
+}
+
+/// Identity variant (no `encrypt-consts`): the value passes straight through.
+#[cfg(not(feature = "encrypt-consts"))]
+#[macro_export]
+macro_rules! enci {
+    ($v:expr) => {
+        ($v as i64)
+    };
 }
 
 /// Re-export of `obfstr`'s macro, so `obfstr_err!` can reach it through `$crate`

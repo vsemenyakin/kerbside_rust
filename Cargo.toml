@@ -36,8 +36,11 @@ introspection = []
 # running process (the primary technique every RE report in this project relied
 # on). Off by default so dev, release and the test suite stay freely debuggable;
 # scripts/build.sh turns it on for `dist` (--features anti-tamper). It enables the
-# crypt crate's self-integrity decode key and its message redaction.
-anti-tamper = ["crypt/self-integrity", "crypt/redact"]
+# crypt crate's constant encryption, its self-integrity decode key, and its message
+# redaction. Because constant encryption is gated here, a non-`anti-tamper` build
+# (dev/release) leaves `encf!`/`enci!` as the identity -- cleartext constants, no
+# decode cost -- which is what makes release a zero-protection benchmark baseline.
+anti-tamper = ["crypt/encrypt-consts", "crypt/self-integrity", "crypt/redact"]
 
 # Overlay video and image codecs: `--overlay` mp4 output and make_clip's PNG
 # export. A feature because videoio/imgcodecs pull in OpenCV's FFmpeg / GStreamer

@@ -1,12 +1,18 @@
 //! Hardware-independent unit tests: constant round-trip, FNV-1a vectors, and the
-//! key-folding algebra. These run under default features (the decode key is `K`
-//! behind a `black_box`), so `encf!`/`enci!` decode to exactly the original value.
+//! key-folding algebra.
+//!
+//! `encf!`/`enci!` only encrypt under the `encrypt-consts` feature; without it
+//! they are the identity. So the *encryption* round-trip below is gated on
+//! `encrypt-consts` (run `cargo test -p crypt --features encrypt-consts` to
+//! exercise it), and a separate identity test covers the default (no-feature)
+//! path. Either way the returned value equals the source literal.
 
-// These assert that encf!/enci! are the identity when the decode key is the
-// static `K` -- i.e. without `self-integrity`. Under `self-integrity` the key is
-// zero until a *sealed* binary runs `init_keying()`, so round-trip there is proven
-// end-to-end by `seal_roundtrip.rs` instead, not in an unsealed test binary.
-#[cfg(not(feature = "self-integrity"))]
+// The encryption round-trip: with `encrypt-consts` on and `self-integrity` off,
+// the decode key is the static `K` behind a `black_box`, so encf!/enci! decode to
+// exactly the original value. Under `self-integrity` the key is zero until a
+// *sealed* binary runs `init_keying()`, so round-trip there is proven end-to-end
+// by `seal_roundtrip.rs` instead, not in an unsealed test binary.
+#[cfg(all(feature = "encrypt-consts", not(feature = "self-integrity")))]
 #[test]
 fn encf_roundtrip() {
     // encf!/enci! encrypt at compile time, so they take *literals* (const exprs).
@@ -25,7 +31,7 @@ fn encf_roundtrip() {
     assert_eq!(crypt::encf!(123456.789), 123456.789);
 }
 
-#[cfg(not(feature = "self-integrity"))]
+#[cfg(all(feature = "encrypt-consts", not(feature = "self-integrity")))]
 #[test]
 fn enci_roundtrip() {
     assert_eq!(crypt::enci!(0), 0);
@@ -37,6 +43,24 @@ fn enci_roundtrip() {
     assert_eq!(crypt::enci!(i64::MAX), i64::MAX);
     assert_eq!(crypt::enci!(1234567), 1234567);
     assert_eq!(crypt::enci!(-987654321), -987654321);
+}
+
+// The default (no `encrypt-consts`) path: encf!/enci! are the identity. This
+// asserts the macros still expand and return the source value unchanged, so the
+// zero-overhead baseline build is behaviour-identical to the encrypting one.
+#[cfg(not(feature = "encrypt-consts"))]
+#[test]
+fn identity_passthrough() {
+    assert_eq!(crypt::encf!(0.0), 0.0);
+    assert_eq!(crypt::encf!(1.35), 1.35);
+    assert_eq!(crypt::encf!(-0.5), -0.5);
+    assert_eq!(crypt::encf!(1.0 / 255.0), 1.0 / 255.0);
+    assert_eq!(crypt::encf!(3.141592653589793), 3.141592653589793);
+    assert_eq!(crypt::enci!(0), 0);
+    assert_eq!(crypt::enci!(90), 90);
+    assert_eq!(crypt::enci!(-42), -42);
+    assert_eq!(crypt::enci!(i64::MIN), i64::MIN);
+    assert_eq!(crypt::enci!(i64::MAX), i64::MAX);
 }
 
 #[test]

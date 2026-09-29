@@ -24,18 +24,23 @@
 # taken relative to the directory you ran the script from, not the repo root.
 # BINARY=path/to/kerbside still overrides the path directly and wins over both.
 #
-# Two binary "kinds" are measured differently, because the shipped build has a
-# different, minimal CLI:
+# There are two measurements, picked by whether --clip is given:
 #
-#   * introspection (release / dev): the realtime, paced run with the per-frame
-#     perf CSV and the stage table -- the latency benchmark. This is the default.
-#   * dist (the shipped build): no --version, no --realtime/--perf; it takes ONE
-#     positional argument (a clip) and replays it, printing only the oracle hash.
-#     So it is benchmarked for *throughput*: wall time to replay a clip, in fps.
-#     A dist binary needs an input clip -- pass it with --clip FILE (a KRW1 clip;
-#     generate one from a release build with `--generate`). It cannot be streamed
-#     the way the realtime run generates frames in-process, and a full 3000-frame
-#     clip is ~8 GB on disk, so pick a clip size that fits the target.
+#   * realtime (no --clip): the paced run over the self-generated scene, with the
+#     per-frame perf CSV and the stage table -- the latency benchmark. Introspection
+#     builds only. This is the default and is unchanged.
+#   * throughput (--clip FILE): time a full *replay* of the clip and report fps
+#     (frames / wall). Both kinds do this, so a protected (dist) and an unprotected
+#     (release) build can be compared head-to-head on the SAME clip -- that is how
+#     you measure what the hardening costs. Both replay under the default profile
+#     (no --profile bench) with no perf instrumentation, so the numbers are
+#     comparable. The dist build has this as its only mode (it takes one positional
+#     clip); the introspection build is driven with `--replay --input FILE`.
+#
+#     A clip is ~2.76 MB/frame and the pipeline caps replay at SCENE_FRAMES
+#     (default 1500), so make a clip of <= that many frames from a release build:
+#         target/release/kerbside --generate clip.krw --frames 1500
+#     A dist binary REQUIRES --clip (it cannot generate a scene).
 #
 # --build dist selects the dist kind; for a dist binary passed via --path, add
 # --dist so the script uses the dist protocol rather than trying --version.
@@ -61,6 +66,10 @@ PATH_ARG=""
 DIST_FLAG=0
 CLIP=""
 BINARY_ENV="${BINARY:-}"
+# The default-profile SCENE_FRAMES (config/video.rs): the throughput replay runs
+# under the default profile, which caps replay at this many frames, for both kinds.
+# Update if that default changes. A clip longer than this is only partly replayed.
+SCENE_CAP=1500
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -135,6 +144,14 @@ else
     KIND="introspection"
 fi
 
+# A clip switches on the throughput measurement (timed replay); with no clip the
+# introspection build does its realtime/stage benchmark. dist always has a clip.
+if [[ -n "$CLIP" ]]; then
+    MODE="throughput"
+else
+    MODE="realtime"
+fi
+
 fail() {
     if [[ "$FORCE" == "1" ]]; then
         echo "WARNING (forced): $1" >&2
@@ -155,21 +172,10 @@ if [[ ! -x "$BINARY" ]]; then
     exit 1
 fi
 
-# The staleness/validity check differs by kind. Introspection builds are probed
-# with --version (below). The dist build has no --version -- it takes one clip
-# positionally and prints only the oracle hash -- so its check is the timed
-# replay itself (a stale/wrong build will not print a 64-hex oracle); here we
-# only validate that an input clip was supplied and is a real KRW1 clip.
-if [[ "$KIND" == "dist" ]]; then
-    VERSION_BLOCK=""
-    if [[ -z "$CLIP" ]]; then
-        echo "REFUSING TO BENCHMARK: the dist build needs an input clip." >&2
-        echo "  It takes one positional argument and replays it; pass --clip FILE." >&2
-        echo "  Make one from a release build (a clip is ~2.76 MB/frame, so choose" >&2
-        echo "  a size that fits the target):" >&2
-        echo "    target/release/kerbside --generate clip.krw --profile bench --frames $FRAMES" >&2
-        exit 1
-    fi
+# Validate the input clip whenever one is given -- both the dist kind and an
+# introspection throughput run replay it. n_frames is the little-endian i64 at
+# byte offset 16 of the KRW1 header; the throughput measurement caps at SCENE_CAP.
+if [[ -n "$CLIP" ]]; then
     if [[ ! -f "$CLIP" ]]; then
         echo "REFUSING TO BENCHMARK: --clip $CLIP not found." >&2
         exit 1
@@ -178,10 +184,22 @@ if [[ "$KIND" == "dist" ]]; then
         echo "REFUSING TO BENCHMARK: $CLIP is not a KRW1 clip (bad magic)." >&2
         exit 1
     fi
-    # n_frames is the little-endian i64 at byte offset 16 of the KRW1 header.
     CLIP_FRAMES="$(od -An -j16 -N8 -tu8 "$CLIP" 2>/dev/null | tr -d ' ')"
     [[ "$CLIP_FRAMES" =~ ^[0-9]+$ ]] || CLIP_FRAMES=0
 fi
+
+# The dist build takes a clip positionally and has no --version, so it requires a
+# clip and skips the version gate -- its functional/staleness check is the timed
+# replay itself (a stale/wrong build will not print a 64-hex oracle).
+if [[ "$KIND" == "dist" && -z "$CLIP" ]]; then
+    echo "REFUSING TO BENCHMARK: the dist build needs an input clip." >&2
+    echo "  It takes one positional argument and replays it; pass --clip FILE." >&2
+    echo "  Make one from a release build (a clip is ~2.76 MB/frame; keep it" >&2
+    echo "  <= SCENE_FRAMES = $SCENE_CAP frames):" >&2
+    echo "    target/release/kerbside --generate clip.krw --frames $SCENE_CAP" >&2
+    exit 1
+fi
+[[ "$KIND" == "dist" ]] && VERSION_BLOCK=""
 
 # A binary that does not understand --version is one built before this script
 # existed, which means it was built from different source than the tree you are
@@ -279,6 +297,8 @@ if [[ "$KIND" == "introspection" ]]; then
     sed 's/^/               /' <<<"$VERSION_BLOCK" | sed '1s/^ *//;1s/^/binary:        /'
 else
     echo "binary:        $BINARY (dist build; no --version)"
+fi
+if [[ -n "$CLIP" ]]; then
     echo "clip:          $CLIP ($CLIP_FRAMES frames)"
 fi
 if command -v rustc >/dev/null 2>&1; then
@@ -295,7 +315,7 @@ fi
 
 mkdir -p "$OUT"
 
-if [[ "$KIND" == "introspection" ]]; then
+if [[ "$MODE" == "realtime" ]]; then
     echo
     echo "== realtime run: $FRAMES frames  (build: $BUILD, binary: $BINARY) =="
 
@@ -328,37 +348,61 @@ if [[ "$KIND" == "introspection" ]]; then
         "$PYTHON" tools/perf_report.py "${REPORT_ARGS[@]}" | tee -a "$OUT/bench_summary.txt"
     fi
 else
-    # dist throughput: the shipped build has no realtime/perf flags -- it replays
-    # the clip and prints only the oracle hash. So we time a full replay and report
-    # frames/wall as fps. The run doubles as the staleness/functional check: a
-    # stale or wrong build (or a bad clip, or a missing shared library) will not
-    # print a `sha256 <64 hex>` line, and we refuse without recording.
+    # Throughput: time a full replay of the clip and report fps (frames / wall).
+    # The measurement is the same for both kinds -- only the invocation differs --
+    # so a protected (dist) and an unprotected (release) build are directly
+    # comparable on the SAME clip. Both replay under the default profile with no
+    # perf instrumentation. The run doubles as the functional/staleness check: a
+    # stale/wrong build (or a bad clip, or a missing shared library) will not print
+    # a `sha256 <64 hex>` line, and we refuse without recording.
+    if [[ "$KIND" == "dist" ]]; then
+        RUN_CMD=("$BINARY" "$CLIP")
+    else
+        # introspection replay on the clip: default profile (no --profile bench),
+        # no --perf/--gc-stats, and --out "" to suppress the results CSV -- as close
+        # to the dist invocation's work as the introspection CLI gets.
+        RUN_CMD=("$BINARY" --replay --input "$CLIP" --out "")
+    fi
+
+    # Frames actually replayed: the pipeline caps at SCENE_CAP for both kinds.
+    if [[ "$CLIP_FRAMES" -gt "$SCENE_CAP" ]]; then
+        PROCESSED="$SCENE_CAP"
+        echo "NOTE: clip has $CLIP_FRAMES frames but replay caps at SCENE_FRAMES=$SCENE_CAP;" >&2
+        echo "      fps is computed on $SCENE_CAP frames." >&2
+    else
+        PROCESSED="$CLIP_FRAMES"
+    fi
+
     echo
-    echo "== dist replay: $CLIP_FRAMES frames  (binary: $BINARY, clip: $CLIP) =="
+    echo "== $KIND throughput: $PROCESSED frames  (binary: $BINARY, clip: $CLIP) =="
 
     set +e
     T0="$(date +%s.%N)"
-    HASH_LINE="$("$BINARY" "$CLIP" 2>/dev/null)"
+    RAW_OUT="$("${RUN_CMD[@]}" 2>/dev/null)"
     RC=$?
     T1="$(date +%s.%N)"
     set -e
 
-    if [[ $RC -ne 0 || ! "$HASH_LINE" =~ ^sha256\ [0-9a-f]{64}$ ]]; then
-        echo "REFUSING TO BENCHMARK: the dist replay did not produce an oracle hash." >&2
-        echo "  exit=$RC  output: ${HASH_LINE:-(none)}" >&2
+    # dist prints only the oracle; the introspection build prints extra diagnostic
+    # lines too, so pull the sha256 line out rather than matching the whole output.
+    HASH_LINE="$(grep -E '^sha256 [0-9a-f]{64}$' <<<"$RAW_OUT" | head -1)"
+    if [[ $RC -ne 0 || -z "$HASH_LINE" ]]; then
+        echo "REFUSING TO BENCHMARK: the replay did not produce an oracle hash." >&2
+        echo "  exit=$RC  output: ${RAW_OUT:-(none)}" >&2
         echo "  A stale/wrong build, a bad clip, or a missing shared library." >&2
         echo "    $REBUILD_CMD" >&2
         exit 1
     fi
 
     WALL="$(echo "$T1 - $T0" | bc -l)"
-    if [[ "$CLIP_FRAMES" -gt 0 ]]; then
-        FPS="$(echo "scale=1; $CLIP_FRAMES / $WALL" | bc -l 2>/dev/null || echo 'n/a')"
+    if [[ "$PROCESSED" -gt 0 ]]; then
+        FPS="$(echo "scale=1; $PROCESSED / $WALL" | bc -l 2>/dev/null || echo 'n/a')"
     else
         FPS="n/a"
     fi
     {
-        echo "frames:        $CLIP_FRAMES"
+        echo "kind:          $KIND"
+        echo "frames:        $PROCESSED"
         printf 'wall:          %.2f s\n' "$WALL"
         echo "throughput:    $FPS fps"
         echo "oracle:        $HASH_LINE"
@@ -366,4 +410,4 @@ else
 fi
 
 echo
-echo "Recorded to $OUT/. Environment: kind=$KIND build=$BUILD governor=$GOVERNOR temp=${TEMP_C}C forced=$FORCE"
+echo "Recorded to $OUT/. Environment: kind=$KIND build=$BUILD mode=$MODE governor=$GOVERNOR temp=${TEMP_C}C forced=$FORCE"
