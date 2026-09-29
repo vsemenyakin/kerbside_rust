@@ -359,9 +359,11 @@ else
         RUN_CMD=("$BINARY" "$CLIP")
     else
         # introspection replay on the clip: default profile (no --profile bench),
-        # no --perf/--gc-stats, and --out "" to suppress the results CSV -- as close
-        # to the dist invocation's work as the introspection CLI gets.
-        RUN_CMD=("$BINARY" --replay --input "$CLIP" --out "")
+        # no --perf/--gc-stats, and the results CSV sent to /dev/null so it is not
+        # written -- as close to the dist invocation's work as the introspection CLI
+        # gets. (An empty --out "" is rejected by the introspection build, which
+        # tries to open the path; /dev/null is the writable no-op equivalent.)
+        RUN_CMD=("$BINARY" --replay --input "$CLIP" --out /dev/null)
     fi
 
     # Frames actually replayed: the pipeline caps at SCENE_CAP for both kinds.
