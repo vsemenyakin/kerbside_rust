@@ -137,3 +137,14 @@ strip = "symbols"
 # acceptable for a shipped device, and it is why dist's codegen (and timings)
 # diverge from release.
 panic = "abort"
+
+# Benchmark-only twin of `dist`: identical code generation (it adds no settings of
+# its own, only inherits), existing SOLELY to give the unprotected build its own
+# output directory (target/<triple>/dist-nodef) so it can never overwrite or be
+# mistaken for the real shipped dist artefact. scripts/build.sh --no-defense builds
+# THIS profile without the anti-tamper feature and without the OLLVM plugin, so the
+# only difference from dist is the protection itself -- for measuring what the
+# hardening costs. NOT a shippable artefact: it has cleartext constants and no
+# anti-tamper. Never seal, audit or ship it.
+[profile.dist-nodef]
+inherits = "dist"

@@ -4,6 +4,10 @@
 #     scripts/build.sh              dist profile -- what you ship (OBFUSCATED)
 #     scripts/build.sh release      for benchmarking; tools/bench.sh looks here
 #     scripts/build.sh dev          debug build, for development only
+#     scripts/build.sh --no-defense UNPROTECTED twin of dist (dist-nodef profile):
+#                                   identical codegen but no anti-tamper feature and
+#                                   no OLLVM, for measuring the protection's cost.
+#                                   Cleartext constants -- benchmark only, NEVER ship.
 #
 # The Linux counterpart of scripts/build.cmd. It sets the environment, builds,
 # and then checks the binary for absolute paths from this machine -- because a
@@ -36,7 +40,27 @@ if ! command -v rustup >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
     source "$HOME/.cargo/env"
 fi
 
-PROFILE="${1:-dist}"
+# --- arguments -----------------------------------------------------------
+#   [dist|release|dev]   which profile (default dist)
+#   --no-defense         build the UNPROTECTED benchmark twin of dist: same code
+#                        generation, but without the anti-tamper feature and
+#                        without the OLLVM plugin, written to the dist-nodef
+#                        profile so it cannot overwrite the real dist. dist only.
+PROFILE="dist"
+NO_DEFENSE=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-defense)          NO_DEFENSE=1 ;;
+        dist|release|dev|debug) PROFILE="$arg" ;;
+        *) echo "REFUSING TO BUILD: unknown argument '$arg'" >&2
+           echo "  usage: scripts/build.sh [dist|release|dev] [--no-defense]" >&2
+           exit 2 ;;
+    esac
+done
+if [[ "$NO_DEFENSE" == 1 && "$PROFILE" != "dist" ]]; then
+    echo "REFUSING TO BUILD: --no-defense only applies to the dist profile." >&2
+    exit 2
+fi
 
 # --- obfuscation configuration (dist only) -------------------------------
 # Overridable from the environment. Defaults match what was built on this board.
@@ -54,13 +78,37 @@ OBF_TOOLCHAIN="${OBF_TOOLCHAIN:-nightly-2025-06-15}"
 OBF_PLUGIN="${OBF_PLUGIN:-$PWD/vendor/Pluto-llvm20.so}"
 OBF_POLICY="${OBF_POLICY:-policy.json}"
 
+# A `dist` build is "dist-like": build-std, static OpenCV, the pinned toolchain.
+# The unprotected benchmark twin (--no-defense) is dist-like too, but skips the
+# protection steps (OLLVM, the anti-tamper feature, CRYPT_K, seal, the strict
+# audit) and builds the `dist-nodef` profile so its artefact goes to its own
+# directory and can never overwrite or be mistaken for the real shipped dist.
+DIST_LIKE=0
+DEFENSE=1
+CARGO_PROFILE="$PROFILE"
+if [[ "$PROFILE" == "dist" ]]; then
+    DIST_LIKE=1
+    if [[ "$NO_DEFENSE" == 1 ]]; then
+        CARGO_PROFILE="dist-nodef"
+        DEFENSE=0
+    fi
+fi
+
 # Cargo's profile names and its output directories do not match for the one
 # built-in debug profile: `--profile dev` writes to target/debug. Everything
-# else, including custom profiles like `dist`, uses its own name.
-case "$PROFILE" in
-    dev|debug) PROFILE="dev"; OUT_DIR="debug" ;;
-    *)         OUT_DIR="$PROFILE" ;;
+# else, including custom profiles like `dist`/`dist-nodef`, uses its own name.
+case "$CARGO_PROFILE" in
+    dev|debug) CARGO_PROFILE="dev"; OUT_DIR="debug" ;;
+    *)         OUT_DIR="$CARGO_PROFILE" ;;
 esac
+
+if [[ "$NO_DEFENSE" == 1 ]]; then
+    echo "##############################################################"
+    echo "##  UNPROTECTED BUILD (--no-defense)                        ##"
+    echo "##  NO obfuscation, NO constant encryption, NO anti-tamper. ##"
+    echo "##  Cleartext constants. For benchmarking ONLY -- DO NOT SHIP.##"
+    echo "##############################################################"
+fi
 
 # --- environment ---------------------------------------------------------
 # Sets RUSTFLAGS with the --remap-path-prefix flags, and points at the ONNX
@@ -93,7 +141,7 @@ CARGO_ARGS=()
 BUILD_STD_ARGS=()
 RUSTC_PLUGIN_ARGS=()
 HOST_TRIPLE=""
-if [[ "$PROFILE" == "dist" ]]; then
+if [[ "$DIST_LIKE" == 1 ]]; then
     if ! rustup toolchain list 2>/dev/null | grep -q "^${OBF_TOOLCHAIN}"; then
         echo "REFUSING TO BUILD: the dist profile needs the pinned toolchain '${OBF_TOOLCHAIN}'." >&2
         echo "  Its LLVM must match the obfuscation plugin's LLVM. Install it:" >&2
@@ -108,22 +156,25 @@ if [[ "$PROFILE" == "dist" ]]; then
         echo "    rustup component add rust-src --toolchain ${OBF_TOOLCHAIN}" >&2
         exit 1
     fi
-    if [[ ! -f "$OBF_PLUGIN" ]]; then
-        echo "REFUSING TO BUILD: obfuscation plugin not found: $OBF_PLUGIN" >&2
-        echo "  Build it (Pluto backend of lich4/ollvm-pass) against the LLVM that" >&2
-        echo "  ${OBF_TOOLCHAIN} carries, or point OBF_PLUGIN at it. See hardening/." >&2
-        exit 1
-    fi
-    if [[ ! -f "$OBF_POLICY" ]]; then
-        echo "REFUSING TO BUILD: obfuscation policy not found: $OBF_POLICY" >&2
-        echo "  Pluto reads it from the working directory. Restore policy.json." >&2
-        exit 1
-    fi
-    if [[ ! -f "$PWD/scripts/obf-rustc-wrapper.sh" ]]; then
-        echo "REFUSING TO BUILD: obfuscation rustc wrapper not found:" >&2
-        echo "  $PWD/scripts/obf-rustc-wrapper.sh" >&2
-        echo "  It scopes -Zllvm-plugins to the kerbside crate. Restore it." >&2
-        exit 1
+    # The OLLVM plugin / policy / wrapper are only needed for the protected build.
+    if [[ "$DEFENSE" == 1 ]]; then
+        if [[ ! -f "$OBF_PLUGIN" ]]; then
+            echo "REFUSING TO BUILD: obfuscation plugin not found: $OBF_PLUGIN" >&2
+            echo "  Build it (Pluto backend of lich4/ollvm-pass) against the LLVM that" >&2
+            echo "  ${OBF_TOOLCHAIN} carries, or point OBF_PLUGIN at it. See hardening/." >&2
+            exit 1
+        fi
+        if [[ ! -f "$OBF_POLICY" ]]; then
+            echo "REFUSING TO BUILD: obfuscation policy not found: $OBF_POLICY" >&2
+            echo "  Pluto reads it from the working directory. Restore policy.json." >&2
+            exit 1
+        fi
+        if [[ ! -f "$PWD/scripts/obf-rustc-wrapper.sh" ]]; then
+            echo "REFUSING TO BUILD: obfuscation rustc wrapper not found:" >&2
+            echo "  $PWD/scripts/obf-rustc-wrapper.sh" >&2
+            echo "  It scopes -Zllvm-plugins to the kerbside crate. Restore it." >&2
+            exit 1
+        fi
     fi
     # build-std must know the concrete target; there is no host default for it.
     HOST_TRIPLE="$(rustc "+${OBF_TOOLCHAIN}" -vV | awk '/^host: /{print $2}')"
@@ -148,8 +199,10 @@ if [[ "$PROFILE" == "dist" ]]; then
     # (never for std or the dependencies), so std and the deps stay plugin-free
     # (they must not be obfuscated) and the plugin reads policy.json from the repo
     # root, which is the kerbside crate's own compile CWD.
-    export OBF_PLUGIN
-    export RUSTC_WORKSPACE_WRAPPER="$PWD/scripts/obf-rustc-wrapper.sh"
+    if [[ "$DEFENSE" == 1 ]]; then
+        export OBF_PLUGIN
+        export RUSTC_WORKSPACE_WRAPPER="$PWD/scripts/obf-rustc-wrapper.sh"
+    fi
 
     # --- static OpenCV (shipped binary only) ---------------------------------
     # Link core/imgproc/video from the system static archives (.a) so their cv::
@@ -187,30 +240,40 @@ if [[ "$PROFILE" == "dist" ]]; then
         # (IMAGE_POINTS, FRAME_WIDTH, ...) and the derived Debug labels never
         # reach the shipped binary. dev/release keep it (and --dump-settings).
         "--no-default-features"
-        # Anti-tamper umbrella (shipped only): three run-time measures gated on
-        # this one feature -- PR_SET_DUMPABLE(0) + TracerPid refusal (main::harden)
-        # and the anti-emulation decode key (crypt::keying, an environment-probed
-        # key so encf!/enci! decode to garbage under an emulator).
-        "--features" "anti-tamper"
     )
+    # Anti-tamper umbrella (protected build only): the run-time gates
+    # (main::harden -- non-dumpable, TracerPid refusal, self-ptrace, mseal), the
+    # code-integrity decode key and constant encryption (crypt). The --no-defense
+    # twin omits it, leaving cleartext constants and no runtime hardening -- which
+    # is the whole point of that build.
+    if [[ "$DEFENSE" == 1 ]]; then
+        BUILD_STD_ARGS+=("--features" "anti-tamper")
+    fi
     echo "toolchain: ${OBF_TOOLCHAIN}  (LLVM matched to plugin)"
     echo "  -Zlocation-detail=none                    (drop panic-site source paths)"
     echo "  -Zbuild-std + panic_immediate_abort       (drop std paths and panic strings)"
     echo "  --no-default-features                     (drop settings field-name strings + overlay)"
     echo "  static OpenCV core/imgproc/video          (cv:: calls not LD_PRELOAD-interposable)"
-    echo "  --features anti-tamper                    (non-dumpable + TracerPid refusal + anti-emulation decode key)"
-    echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
+    if [[ "$DEFENSE" == 1 ]]; then
+        echo "  --features anti-tamper                    (non-dumpable + TracerPid + self-ptrace + anti-emulation key + constant encryption)"
+        echo "  -Zllvm-plugins=$(basename "$OBF_PLUGIN")   (OLLVM obfuscation via workspace wrapper, kerbside crate only, policy: $OBF_POLICY)"
+    else
+        echo "  NO --features anti-tamper                 (UNPROTECTED: cleartext constants, no runtime hardening)"
+        echo "  NO -Zllvm-plugins                         (UNPROTECTED: no OLLVM obfuscation)"
+    fi
     echo "  --target $HOST_TRIPLE"
 
-    # Fresh random obfuscation key K for this shipped build (crates/crypt/build.rs
-    # reads CRYPT_K). Kills the recognisable golden-ratio magic number, and makes
-    # two shipped copies use different keys so analysis cannot be reused. Set once,
-    # BEFORE both the program build and the seal-tool build, so the two agree.
-    if [[ -z "${CRYPT_K:-}" ]]; then
-        CRYPT_K="0x$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-        export CRYPT_K
+    # Fresh random obfuscation key K for the protected build (crypt reads CRYPT_K
+    # at compile time). Kills the recognisable magic number and makes two shipped
+    # copies use different keys. Set once, BEFORE both the program build and the
+    # seal-tool build, so the two agree. Not needed without constant encryption.
+    if [[ "$DEFENSE" == 1 ]]; then
+        if [[ -z "${CRYPT_K:-}" ]]; then
+            CRYPT_K="0x$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+            export CRYPT_K
+        fi
+        echo "  CRYPT_K set (random per build)"
     fi
-    echo "  CRYPT_K set (random per build)"
 fi
 
 echo
@@ -231,7 +294,7 @@ echo "== building profile '$PROFILE' -> target/$OUT_DIR =="
 # and retry from clean. Grace window overridable via BUILD_STD_GRACE (seconds).
 build_dist_once() {
     local log; log="$(mktemp)"
-    cargo "${CARGO_ARGS[@]}" build --profile dist "${BUILD_STD_ARGS[@]}" --bin kerbside >"$log" 2>&1 &
+    cargo "${CARGO_ARGS[@]}" build --profile "$CARGO_PROFILE" "${BUILD_STD_ARGS[@]}" --bin kerbside >"$log" 2>&1 &
     local cpid=$!
     tail -n +1 -f "$log" 2>/dev/null & local tpid=$!
     # The "Blocking waiting for file lock" line is printed only on the self-
@@ -257,31 +320,32 @@ build_dist_once() {
     return "$rc"
 }
 
-if [[ "$PROFILE" == "dist" ]]; then
+if [[ "$DIST_LIKE" == 1 ]]; then
     if build_dist_once; then rc=0; else rc=$?; fi
     if (( rc == 42 )); then
         echo >&2
         echo "note: -Zbuild-std lock deadlock detected -- wiping target/$HOST_TRIPLE" >&2
         echo "      for a clean std build and retrying once." >&2
-        rm -rf "target/$HOST_TRIPLE" "target/dist"
+        rm -rf "target/$HOST_TRIPLE" "target/$CARGO_PROFILE"
         if build_dist_once; then rc=0; else rc=$?; fi
     fi
     if (( rc != 0 )); then echo; echo "BUILD FAILED" >&2; exit 1; fi
 else
-    if ! cargo "${CARGO_ARGS[@]}" build --profile "$PROFILE" "${BUILD_STD_ARGS[@]}"; then
+    if ! cargo "${CARGO_ARGS[@]}" build --profile "$CARGO_PROFILE" "${BUILD_STD_ARGS[@]}"; then
         echo; echo "BUILD FAILED" >&2; exit 1
     fi
 fi
 
 # build-std forces --target, which nests the output under target/<triple>/.
-# Re-point the documented target/dist/ path at it so every downstream reference
-# (check_binary below, BUILD.md, BINARY=target/dist/kerbside for bench.sh) keeps
-# working regardless of the host triple.
-if [[ "$PROFILE" == "dist" ]]; then
-    if [[ -d "target/dist" && ! -L "target/dist" ]]; then
-        rm -rf "target/dist"   # stale real directory from a pre-build-std build
+# Re-point the documented target/<profile>/ path at it so every downstream
+# reference (check_binary below, BUILD.md, BINARY=target/dist/kerbside for
+# bench.sh) keeps working regardless of the host triple. The --no-defense twin
+# points its OWN target/dist-nodef -> ... and never touches target/dist.
+if [[ "$DIST_LIKE" == 1 ]]; then
+    if [[ -d "target/$CARGO_PROFILE" && ! -L "target/$CARGO_PROFILE" ]]; then
+        rm -rf "target/$CARGO_PROFILE"   # stale real directory from a pre-build-std build
     fi
-    ln -sfn "$HOST_TRIPLE/dist" "target/dist"
+    ln -sfn "$HOST_TRIPLE/$CARGO_PROFILE" "target/$CARGO_PROFILE"
 fi
 
 BINARY="target/$OUT_DIR/kerbside"
@@ -294,7 +358,7 @@ BINARY="target/$OUT_DIR/kerbside"
 # and toolchain versions they use to match a disassembler/plugin build. `strip =
 # "symbols"` does not remove it, so do it explicitly. Not done for dev/release,
 # which stay diagnosable.
-if [[ "$PROFILE" == "dist" ]]; then
+if [[ "$DIST_LIKE" == 1 ]]; then
     if command -v objcopy >/dev/null 2>&1; then
         objcopy --remove-section .comment "$BINARY" 2>/dev/null \
             || echo "note: could not remove .comment from $BINARY" >&2
@@ -312,7 +376,7 @@ fi
 # of it is dead/display-only data (verified: blanking it leaves the oracle digest
 # unchanged). Neutralise it in place, size-preserving, so ELF offsets and the
 # oracle are untouched.
-if [[ "$PROFILE" == "dist" ]]; then
+if [[ "$DIST_LIKE" == 1 ]]; then
     _scrub_py="$(command -v python3 || command -v python || true)"
     if [[ -n "$_scrub_py" ]]; then
         "$_scrub_py" tools/scrub_opencv.py "$BINARY" \
@@ -329,8 +393,9 @@ fi
 # byte change to .text -- a spliced-in argument logger, a breakpoint -- moves the
 # hash, so every encrypted constant/string decodes to garbage. Fail the build if
 # it cannot run, rather than shipping an unsealed (sentinel-keyed) binary that
-# would itself produce garbage.
-if [[ "$PROFILE" == "dist" ]]; then
+# would itself produce garbage. Skipped for --no-defense: with no anti-tamper
+# there is no SALT2 sentinel to patch (and nothing to seal).
+if [[ "$DEFENSE" == 1 ]]; then
     # The sealer is the crypt crate's `seal` bin (single source of truth for the
     # constants and the .text hash -- it can never drift from the runtime). Build
     # it in a CLEAN environment: it is a host build-tool and must NOT inherit the
@@ -351,19 +416,26 @@ fi
 # --- the leaked-path check -----------------------------------------------
 # dev and release deliberately do not harden away the first-party module tree;
 # only dist does. So allow first-party paths for those (the check still fails on
-# any absolute build-machine path), and demand them gone for dist.
-CHECK_ARGS=("--profile" "$PROFILE")
-if [[ "$PROFILE" != "dist" ]]; then
-    CHECK_ARGS+=("--allow-first-party")
-fi
+# any absolute build-machine path), and demand them gone for dist. The
+# --no-defense twin is deliberately unprotected (cleartext constants), so the
+# strict audit would fail by design -- skip it (this artefact is never shipped).
 echo
-PYTHON="$(command -v python3 || command -v python || true)"
-if [[ -z "$PYTHON" ]]; then
-    echo "python3 not found -- skipping the leaked-path check." >&2
-    echo "Run it wherever you do have python:" >&2
-    echo "  python3 tools/check_binary.py $BINARY" >&2
+if [[ "$NO_DEFENSE" == 1 ]]; then
+    echo "note: skipping the leak audit for the UNPROTECTED --no-defense build." >&2
+    echo "      It has cleartext constants by design and must never be shipped." >&2
 else
-    "$PYTHON" tools/check_binary.py "$BINARY" "${CHECK_ARGS[@]}"
+    CHECK_ARGS=("--profile" "$PROFILE")
+    if [[ "$PROFILE" != "dist" ]]; then
+        CHECK_ARGS+=("--allow-first-party")
+    fi
+    PYTHON="$(command -v python3 || command -v python || true)"
+    if [[ -z "$PYTHON" ]]; then
+        echo "python3 not found -- skipping the leaked-path check." >&2
+        echo "Run it wherever you do have python:" >&2
+        echo "  python3 tools/check_binary.py $BINARY" >&2
+    else
+        "$PYTHON" tools/check_binary.py "$BINARY" "${CHECK_ARGS[@]}"
+    fi
 fi
 
 # --- will it actually start? ---------------------------------------------
@@ -378,7 +450,7 @@ echo
 # used there -- it also exercises the OpenCV/onnxruntime load. (libonnxruntime is
 # `dlopen`ed, not an `ldd` entry, so the dist check does not cover it; a missing
 # runtime shows up on the first real analysis run instead.)
-if [[ "$PROFILE" == "dist" ]]; then
+if [[ "$DIST_LIKE" == 1 ]]; then
     if ldd "$BINARY" 2>&1 | grep -q "not found"; then
         echo
         echo "WARNING: $BINARY was built but has unresolved libraries:" >&2
@@ -387,6 +459,10 @@ if [[ "$PROFILE" == "dist" ]]; then
     fi
     echo
     echo "Built $BINARY"
+    if [[ "$NO_DEFENSE" == 1 ]]; then
+        echo "  ^ UNPROTECTED (--no-defense): benchmark twin of dist, cleartext"
+        echo "    constants, no anti-tamper, no OLLVM. DO NOT SHIP THIS."
+    fi
 elif "$BINARY" --replay --frames 1 >/dev/null 2>&1; then
     echo
     echo "Built $BINARY"
