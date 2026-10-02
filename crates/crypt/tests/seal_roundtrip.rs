@@ -79,8 +79,14 @@ fn run_stdout(bin: &PathBuf) -> (bool, String) {
 
 #[test]
 fn seal_roundtrip_genuine_and_patched() {
+    // Both features: `self-integrity` is only the *key* that gates decode -- the
+    // decode itself (what the patched-code check actually observes) exists only
+    // under `encrypt-consts`. With `self-integrity` alone, `enci!` is the identity
+    // and `sealed_probe` prints the secret unconditionally, so the fail-closed
+    // assertion below could never fire.
     let probe = build_and_locate(
-        &["build", "-p", "crypt", "--example", "sealed_probe", "--features", "self-integrity"],
+        &["build", "-p", "crypt", "--example", "sealed_probe",
+          "--features", "self-integrity,encrypt-consts"],
         "sealed_probe",
     );
     let seal_bin = build_and_locate(&["build", "-p", "crypt", "--bin", "seal"], "seal");
